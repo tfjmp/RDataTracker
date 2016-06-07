@@ -14,7 +14,7 @@ ddg.r.script.path = paste(testDir,"ReturnTest.R",sep="/")
 ddg.path = paste(testDir, ddgDir, sep="/")
 ddg.init(ddg.r.script.path,
 		 ddg.path,
-         enable.console=FALSE)
+         enable.console=TRUE)
 
 f <- function (aa, bb) {
   ddg.function()
@@ -39,7 +39,7 @@ f4 <- function(n) {
     ddg.return.value(0)
   }
   else {
-    ddg.return.value(f4(n-1))
+    ddg.return.value(f4(n-1)+1)
   }
 }
 
@@ -48,13 +48,23 @@ f5 <- function(n) {
     ddg.return.value(0)
   }
   else {
-    ddg.return.value(f5(n-1))
+    ddg.return.value(f5(n-1)+1)
   }
 }
 
 f6 <- function(s1, s2, s3, s4) {
   ddg.function()
   ddg.return.value(3)
+}
+
+f7 <- function(n) {
+  if (n == 0) {
+    ddg.return.value(0)
+  }
+  else {
+    retValue <- f7(n-1)
+    ddg.return.value(retValue+1)
+  }
 }
 
 
@@ -80,6 +90,7 @@ f6(abc, 5, "a b", x + 1)
 
 print ("The following tests recursion.  The DDGs are not correct.")
 print("Seeing a difference here may be a good thing!")
-f4(3)
+x <- f4(3)
+x <- f7(3)
 f5(3)
 ddg.save(quit=TRUE)

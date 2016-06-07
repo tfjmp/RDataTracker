@@ -1,6 +1,8 @@
 \name{InitSave}
 \alias{ddg.init}
 \alias{ddg.run}
+\alias{ddg.annotate.on}
+\alias{ddg.annotate.off}
 \alias{ddg.save}
 \alias{ddg.flush.ddg}
 \alias{ddg.console.off}
@@ -8,10 +10,12 @@
 \title{Creating Provenance Graphs with RDataTracker}
 \description{These functions are needed to create provenance graphs.}
 \usage{
-ddg.init(r.script.path = NULL, ddgdir = NULL, enable.console = TRUE, max.snapshot.size = -1) 
-ddg.save(quit=FALSE)
+ddg.init(r.script.path = NULL, ddgdir = NULL, enable.console = TRUE, max.snapshot.size = 100) 
+ddg.save(r.script.path = NULL, quit=FALSE)
 ddg.run(r.script.path = NULL, ddgdir = NULL, f = NULL, enable.console = TRUE, 
-    max.snapshot.size = -1)
+    annotate.functions = TRUE, max.snapshot.size = 100)
+ddg.annotate.on(fnames = NULL)
+ddg.annotate.off(fnames = NULL)
 ddg.console.on()
 ddg.console.off()
 ddg.flush.ddg(ddg.path = NULL)
@@ -22,12 +26,14 @@ ddg.flush.ddg(ddg.path = NULL)
   \item{enable.console}{ If TRUE, any commands executed in the console, either by typing, copying and 
     pasting, or selecting and running, will result in a procedure node created in the provenance graph, with
     data nodes created for each variable assigned and data flow edges for variables used and set. }
+  \item{annotate.functions}{specifies whether automatic annotation of functions should be enabled. }
   \item{max.snapshot.size}{ The maximum size for objects that should be output in snapshot
     files.  If max.snapshot.size is -1, there is no limit. If max.snapshot.size is 0, snapshot nodes
     are created but no snapshot files are saved. }
   \item{f}{ A function to run.  Data provenance is collected within the function. }
+  \item{fnames}{ A list of one or more function names. }
   \item{quit}{ If TRUE, all DDG files are removed from memory. }
-  \item{ddg.path}{The path to the DDG directory which needs to be flushed}
+  \item{ddg.path}{The path to the DDG directory which needs to be flushed. }
 }
 \details{
   In order to use RDataTracker to collect data provenance, the user must either call ddg.init 
@@ -53,7 +59,11 @@ ddg.flush.ddg(ddg.path = NULL)
   a DDG is created for the script, and a copy of the script is saved with the DDG.  If a function 
   is provided, the function is executed with calls to ddg.init and ddg.save so that provenance 
   for the function is captured. In either case, if an R error occurs during execution, the error will be
-  captured in an Exception node in the provenance graph.
+  captured in an Exception node in the provenance graph. If annotate.functions is set to TRUE, 
+  ddg.function, ddg.eval, and ddg.return.value are added to each function definition before the
+  script is executed and these changes are saved to the file annotated-script.r in the ddg directory. 
+  ddg.annotate.on and ddg.annotate.off may be used to limit the functions 
+  that will be annotated or not annotated, respectively.
   
   ddg.console.on and ddg.console.off toggle the console parameter for DDG creation. 
   When the console is enabled, all commands sent to the R console are captured as provenance 
