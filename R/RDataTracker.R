@@ -5166,7 +5166,7 @@ ddg.init <- function(r.script.path = NULL, ddgdir = NULL, enable.console = TRUE,
 #   Note that this tests the size of the object that will be turned
 #   into a snapshot, not the size of the resulting snapshot.
 
-ddg.run <- function(load = FALSE,r.script.path = NULL, ddgdir = NULL, f = NULL, enable.console = TRUE, annotate.functions = TRUE, max.snapshot.size = 100) {
+ddg.run <- function(r.script.path = NULL, ddgdir = NULL, f = NULL, enable.console = TRUE, annotate.functions = TRUE, max.snapshot.size = 100,load = FALSE) {
 	
 	# Initiate ddg.
 	ddg.init(r.script.path, ddgdir, enable.console, max.snapshot.size)
