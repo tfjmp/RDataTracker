@@ -2451,6 +2451,7 @@ ddg.MAX_HIST_LINES <- 2^14
   if (length(cmd) > 1) {
     cmd <- paste (cmd, collapse = " ")
   }
+  cmd <- as.character(cmd)
   if(file.exists(cmd)){
     basename(cmd);
   } else {
@@ -4645,7 +4646,6 @@ ddg.MAX_HIST_LINES <- 2^14
   }
 }
 
-
 # .ddg.add.ddg.source replaces source with ddg.source
 
 .ddg.add.ddg.source <- function(parsed.command) {
@@ -4653,6 +4653,166 @@ ddg.MAX_HIST_LINES <- 2^14
   new.command.txt <- paste("ddg.source(", script.name, ")", sep="")
   parsed.command <- parse(text=new.command.txt)
   return(parsed.command)
+}
+
+#.ddg.wrap.block.with.ddg.eval wraps each statement in a block with
+# ddg.eval unless the statement is a ddg function or contains a call
+# to ddg.return.value.
+
+.ddg.wrap.block.with.ddg.eval <- function(block) {
+  # Ignore initial brace.
+  for (i in 2:length(block)) {
+    # Enclose statement in quotation marks and wrap with ddg.eval.
+    statement <- block[[i]]
+    if (!grepl("^ddg.", block[1]) & !.ddg.has.call.to(statement, "ddg.return.value")) {
+      new.statement <- call("ddg.eval", deparse(statement))
+      block[[i]] <- new.statement
+    }
+  }
+  return(block)
+}
+
+# .ddg.add.block.start.finish adds start and finish nodes to blocks that
+# may repeat in for, while, and repeat statements.
+
+.ddg.add.block.start.finish <- function(block, pname) {
+  # Create ddg.start & ddg.finish statements.
+  start.statement <- deparse(call("ddg.start", pname))
+  finish.statement <- deparse(call("ddg.finish", pname))
+  
+  # Get internal statements.
+  pos <- length(block)
+  statements <- deparse(block[[2]])
+  if (pos > 2) {
+    for (i in 3:pos) {
+      statements <- append(statements, deparse(block[[i]]))
+    }
+  }
+
+  # Create new block.
+  block.txt <- paste(c("{", start.statement, statements, finish.statement, "}"), collapse="\n")
+  
+  block.parsed <- parse(text=block.txt)
+                       
+  return(block.parsed[[1]])
+}
+
+# .ddg.annotate.if.statement adds annotations to if statements.
+
+.ddg.annotate.if.statement <- function(parsed.command) {
+  # Get values for first block.
+  parent <- parsed.command[[1]]
+  block <- parent[[3]]
+  bnum  <- 1
+  
+  # Repeat for each block.
+  while (length(parent) == 4) {
+    # Wrap each statement with ddg.eval.
+    block <- .ddg.wrap.block.with.ddg.eval(block)
+    # Reconstruct original statement
+    if (bnum == 1) {
+      parsed.command.txt <- paste(c(paste("if (", deparse(parent[[2]]), ")", sep=""), deparse(block), collapse="\n"))
+    } else {
+      statement.txt <- paste(c(paste("} else if (", deparse(parent[[2]]), ")", sep=""), deparse(block), collapse="\n"))
+      # Remove final brace & new line.
+      last <- length(parsed.command.txt) - 2
+      parsed.command.txt <- parsed.command.txt[c(1:last)]
+      parsed.command.txt <- append(parsed.command.txt, statement.txt)
+    }
+
+    # Get values for next block.
+    parent <- parent[[4]]
+    block <- parent[[3]]
+    bnum <- bnum + 1
+  }
+  
+  # Check for final else.
+  if (length(parent) == 3) {
+    # Wrap each statement with ddg.eval.
+    block <- .ddg.wrap.block.with.ddg.eval(parent)
+    statement.txt <- paste(c(paste("} else", sep=""), deparse(block), collapse=""))
+    # Remove final brace.
+    last <- length(parsed.command.txt) - 2
+    parsed.command.txt <- parsed.command.txt[c(1:last)]
+    parsed.command.txt <- append(parsed.command.txt, statement.txt)
+  }
+  
+  return(parse(text=parsed.command.txt))
+}
+
+# .ddg.annotate.for.statement add annotations to for statements.
+
+.ddg.annotate.for.statement <- function(parsed.command) {
+  # Get statements in block.
+  block <- parsed.command[[1]][[4]]
+
+  # Wrap each statement with ddg.eval.
+  block <- .ddg.wrap.block.with.ddg.eval(block)
+  
+  # Add start and finish nodes.
+  block <- .ddg.add.block.start.finish(block, "for loop")
+  
+  # Reconstruct for statement.
+  block.txt <- deparse(block)
+
+  parsed.command.txt <- paste(c(paste("for (", deparse(parsed.command[[1]][[2]]), " in ", deparse(parsed.command[[1]][[3]]), ")", sep=""), block.txt, collapse="\n"))
+  
+  return(parse(text=parsed.command.txt))
+}
+
+# .ddg.annotate.while.statement adds annotations to while statements.
+
+.ddg.annotate.while.statement <- function(parsed.command) {
+  # Get statements in block.
+  block <- parsed.command[[1]][[3]]
+
+  # Wrap each statement with ddg.eval.
+  block <- .ddg.wrap.block.with.ddg.eval(block)
+  
+  # Add start and finish nodes.
+  block <- .ddg.add.block.start.finish(block, "while loop")
+  
+  # Reconstruct for statement.
+  block.txt <- deparse(block)
+  
+  parsed.command.txt <- paste(c(paste("while (", deparse(parsed.command[[1]][[2]]), ")", sep=""), block.txt, collapse="\n"))
+  
+  return(parse(text=parsed.command.txt))
+}
+
+# .ddg.annotate.repeat.statement add annotations to repeat statements.
+
+.ddg.annotate.repeat.statement <- function(parsed.command) {
+  # Get statements in block.
+  block <- parsed.command[[1]][[2]]
+
+  # Wrap each statement with ddg.eval.
+  block <- .ddg.wrap.block.with.ddg.eval(block)
+  
+  # Add start and finish nodes.
+  block <- .ddg.add.block.start.finish(block, "repeat loop")
+  
+  # Reconstruct for statement.
+  block.txt <- deparse(block)
+  
+  parsed.command.txt <- paste(c(paste("repeat", sep=""), block.txt, collapse="\n"))
+  
+  return(parse(text=parsed.command.txt))
+}
+
+# .ddg.annotate.simple.block adds annotations to simple blocks.
+
+.ddg.annotate.simple.block <- function(parsed.command) {
+  # Get statements in block.
+  block <- parsed.command[[1]]
+
+  # Wrap each statement with ddg.eval.
+  block <- .ddg.wrap.block.with.ddg.eval(block)
+  
+  # Reconstruct block.
+  block.txt <- deparse(block)
+
+  return(parse(text=block.txt))
 }
 
 # .ddg.add.annotations accepts and returns a parsed command.
@@ -4672,8 +4832,31 @@ ddg.MAX_HIST_LINES <- 2^14
     return(.ddg.add.function.annotations(parsed.command))
   }
 
-  # Add other annotations here.
+  # Annotate if statement.
+  if (length(parsed.command[[1]]) > 1 && parsed.command[[1]][[1]] == "if") {
+    return(.ddg.annotate.if.statement(parsed.command)) 
+  }
 
+  # Annotate for statement.
+  if (length(parsed.command[[1]]) > 1 && parsed.command[[1]][[1]] == "for") {
+    return(.ddg.annotate.for.statement(parsed.command)) 
+  }
+  
+  # Annotate while statement.
+  if (length(parsed.command[[1]]) > 1 && parsed.command[[1]][[1]] == "while") {
+    return(.ddg.annotate.while.statement(parsed.command)) 
+  }
+  
+  # Annotate repeat statement.
+  if (length(parsed.command[[1]]) > 1 && parsed.command[[1]][[1]] == "repeat") {
+    return(.ddg.annotate.repeat.statement(parsed.command)) 
+  }
+  
+  # Annotate simple block.
+  if (length(parsed.command[[1]]) > 1 && parsed.command[[1]][[1]] == "{") {
+    return(.ddg.annotate.simple.block(parsed.command))
+  }
+  
   # No annotation required.
   return(parsed.command)
 }
