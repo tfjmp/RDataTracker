@@ -462,6 +462,14 @@ null.pos <- function() {
     return(.ddg.add.ddg.source(parsed.command))
   }
 
+  # Annotate package functions if annotate.packages is TRUE.
+  if (.ddg.annotate.packages()) {
+    # Replace library with ddg.library.
+    if (is.call(parsed.command) && parsed.command[[1]] == "library") {
+      return(.ddg.add.ddg.library(parsed.command))
+    }
+  }
+
   # Annotate internal statements if annotate.inside is TRUE.
   if (ddg.annotate.inside()) {
     # Annotate user-defined functions.
@@ -631,6 +639,17 @@ null.pos <- function() {
 .ddg.add.ddg.source <- function(parsed.command) {
   script.name <- deparse(parsed.command[[2]])
   parsed.command.txt <- paste("ddg.source(", script.name, ")", sep="")
+  return(parse(text=parsed.command.txt))
+}
+
+# .ddg.add.ddg.library replaces library with ddg.library.
+#
+# parsed.command must be a parsed expression that is a call
+# to the library function.
+
+.ddg.add.ddg.library <- function(parsed.command) {
+  pkg.name <- deparse(parsed.command[[2]])
+  parsed.command.txt <- paste("ddg.library(\"", pkg.name, "\")", sep="")
   return(parse(text=parsed.command.txt))
 }
 

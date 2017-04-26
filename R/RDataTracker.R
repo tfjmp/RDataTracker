@@ -204,6 +204,10 @@ ddg.MAX_HIST_LINES <- 2^14
   return(.ddg.get("ddg.loops"))
 }
 
+.ddg.annotate.packages <- function() {
+  return(.ddg.get("ddg.annotate.packages"))
+}
+
 # Functions that allow us to save warnings when they occur
 # so that we can create the warning node after the node
 # that caused the warning is created.
@@ -4539,6 +4543,48 @@ ddg.MAX_HIST_LINES <- 2^14
   }
 }
 
+# .ddg.get.source.code.for.package gets the source code for a package 
+# and saves it to the scripts directory.
+
+# pkg.name = name of package.
+
+.ddg.get.source.code.for.package <- function(pkg.name) {
+  # Get names of all objects in package (exported & unexported).
+  obj.names <- ls(getNamespace(pkg.name), all.names=TRUE)
+  for (i in 1:length(obj.names)) {
+    # Wrap function names with back ticks.
+    obj.names[i] <- paste("`", obj.names[i], "`", sep="")
+    # Join package and function names with ::: operator.
+    obj.names[i] <- paste(pkg.name, ":::", obj.names[i], sep="")
+  }
+
+  # Get source code for each function.
+  src.code <- NULL
+  for (i in 1:length(obj.names)) {
+    # Get function name.
+    str <- strsplit(obj.names[i], ":::")
+    function.name <- str[[1]][[2]]
+      
+    # Get source code with ::: operator.
+    expr <- parse(text=obj.names[i])
+    s.code <- deparse(eval(expr))
+      
+    # Store functions only.
+    if (substr(s.code[1], 1, 8) == "function") {
+      s.code[1] <- paste(function.name, " <- ", s.code[1], sep="")
+      src.code <- c(src.code, s.code)
+    }
+  }
+
+  # Write source code to file
+  fileout <- paste(.ddg.path.scripts(), "/", pkg.name, "-source-code.R", sep="")
+  fileConn <- file(fileout)
+  writeLines(src.code, fileConn)
+  close(fileConn)
+
+  return(fileout)
+}
+
 #--------------------USER FUNCTIONS-----------------------#
 
 # ddg.function creates a procedure node of type Operation for
@@ -5474,10 +5520,12 @@ ddg.finish <- function(pname=NULL) {
 #   If -1, all snapshot files are saved. Size in kilobytes.  Note that
 #   this tests the size of the object that will be turned into a
 #   snapshot, not the size of the resulting snapshot.
+# annotate.packages (optional) - if TRUE, functions in packages loaded with
+#   the library command are annotated.
 # Addition : overwrite (optional) - default TRUE, if FALSE, generates
 #   timestamp for ddg directory
 
-ddg.init <- function(r.script.path = NULL, ddgdir = NULL, overwrite = TRUE, enable.console = TRUE, annotate.inside = TRUE, first.loop = 1, max.loops = 1, max.snapshot.size = 10) {
+ddg.init <- function(r.script.path = NULL, ddgdir = NULL, overwrite = TRUE, enable.console = TRUE, annotate.inside = TRUE, first.loop = 1, max.loops = 1, max.snapshot.size = 10, annotate.packages = FALSE) {
   #.ddg.DDGStatement.init()
   .ddg.init.tables()
 
@@ -5579,6 +5627,9 @@ ddg.init <- function(r.script.path = NULL, ddgdir = NULL, overwrite = TRUE, enab
   # Set number of first loop.
   .ddg.set("ddg.first.loop", first.loop)
 
+  # Set annotation of packages.
+  .ddg.set("ddg.annotate.packages", annotate.packages)
+  
   .ddg.set(".ddg.proc.start.time", .ddg.elapsed.time())
 
   # Store time when script begins execution.
@@ -5619,14 +5670,16 @@ ddg.init <- function(r.script.path = NULL, ddgdir = NULL, overwrite = TRUE, enab
 #   saved. If -1, all snapshot files are saved.  Size in kilobytes.
 #   Note that this tests the size of the object that will be turned
 #   into a snapshot, not the size of the resulting snapshot.
+# annotate.packages (optional) - if TRUE, functions in packages loaded with
+#   the library command are annotated.
 # debug (optional) - If TRUE, enable script debugging. This has the
 #   same effect as inserting ddg.breakpoint() at the top of the script.
 # save.debug (optional) - If TRUE, save debug files to debug directory.
 
-ddg.run <- function(r.script.path = NULL, ddgdir = NULL, overwrite = TRUE, f = NULL, enable.console = TRUE, annotate.inside = TRUE, first.loop = 1, max.loops = 1, max.snapshot.size = 10, debug = FALSE, save.debug = FALSE, display = FALSE) {
+ddg.run <- function(r.script.path = NULL, ddgdir = NULL, overwrite = TRUE, f = NULL, enable.console = TRUE, annotate.inside = TRUE, first.loop = 1, max.loops = 1, max.snapshot.size = 10, annotate.packages = FALSE, debug = FALSE, save.debug = FALSE, display = FALSE) {
 
   # Initiate ddg.
-  ddg.init(r.script.path, ddgdir, overwrite, enable.console, annotate.inside, first.loop, max.loops, max.snapshot.size)
+  ddg.init(r.script.path, ddgdir, overwrite, enable.console, annotate.inside, first.loop, max.loops, max.snapshot.size, annotate.packages)
 
   # Create ddg directory.
   # dir.create(.ddg.path(), showWarnings = FALSE)
@@ -5969,6 +6022,23 @@ ddg.source <- function (file,  ddgdir = NULL, local = FALSE, echo = verbose, pri
   }
 
   invisible()
+}
+
+# ddg.library gets the source code for a package loaded with the library command
+# and sources it with ddg.source.
+
+# pkg.name = name of package.
+
+ddg.library <- function(pkg.name) {
+  # Get source code for package.
+  source.code <- .ddg.get.source.code.for.package(pkg.name)
+
+  # Display message.
+  msg <- paste("Saving ", source.code, sep="")
+  print(msg)
+  
+  # Source the source code with ddg.source.
+  ddg.source(source.code)
 }
 
 .ddg.start.ddg.explorer <- function () {
