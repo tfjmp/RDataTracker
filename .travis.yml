@@ -1,5 +1,7 @@
 # R for travis: see documentation at https://docs.travis-ci.com/user/languages/r
 
+dist: trusty
+sudo: required
 language: R
 sudo: false
 cache: packages
@@ -8,12 +10,46 @@ addons:
   apt:
     packages:
       libicu-dev
+      libfreetype6-dev
+      ant
+      r-cran-chron
+      r-cran-zoo
+      r-cran-shiny
+      r-cran-ggplot2
+      r-cran-gdata
+      r-cran-gridbase
+      r-cran-gridextra
+      r-cran-mgcv
+      r-cran-spatstat
+      r-cran-reshape2
+      r-cran-rcurl
+      r-cran-plyr
 
-r_github_packages:
-  - jimhester/lintr
+r_packages:
+  - chron
+  - gWidgets
+  - dplR
+  - zoo
+  - ggplot2
+  - gdata
+  - grid
+  - gridExtra
+  - shiny
+  - mgcv
+  - akima
+  - spatstat
+  - reshape2
+  - RCurl
+  - plyr
+  - xkcd
+  - sysfonts
+  - extrafont
 
-after_success:
-  - Rscript -e 'lintr::lint_package()'
+script:
+  - R CMD build .
+  - R CMD check *tar.gz
+  - ant -file build.xml install
+  - ant -file tests.xml test-all
 
 notifications:
   slack: endtoendprovenance:WxevOs6n66eZRbCn9HcW2mGD
