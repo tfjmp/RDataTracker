@@ -787,7 +787,7 @@ ddg.MAX_HIST_LINES <- 2^14
 
 .ddg.json.data.node <- function(id, dname, dvalue, val.type, dtype, dscope, from.env, dtime, dloc) {
 
-  jstr <- paste("\n\"d", id, "\" : {\n\"rdt:name\" : \"", dname, "\",\n\"rdt:value\" : \"", dvalue, "\",\n\"rdt:valType\" : \"", val.type, "\",\n\"rdt:type\" : \"", dtype, "\",\n\"rdt:scope\" : \"", dscope, "\",\n\"rdt:fromEnv\" : \"", from.env, "\",\n\"rdt:timestamp\" : \"", dtime, "\",\n\"rdt:location\" : \"", dloc, "\"\n}", sep="")
+  jstr <- paste("\n\"d", id, "\" : {\n\"rdt:name\" : \"", dname, "\",\n\"rdt:value\" : \"", dvalue, "\",\n\"rdt:valType\" : ", val.type, ",\n\"rdt:type\" : \"", dtype, "\",\n\"rdt:scope\" : \"", dscope, "\",\n\"rdt:fromEnv\" : \"", from.env, "\",\n\"rdt:timestamp\" : \"", dtime, "\",\n\"rdt:location\" : \"", dloc, "\"\n}", sep="")
 
   .ddg.append.entity(jstr)
 }
@@ -900,10 +900,10 @@ ddg.MAX_HIST_LINES <- 2^14
 
   if (dvalue != "") value.str <- paste(" Value=\"", dvalue, "\"", sep="")
   else value.str <- ""
-  
+
   if(val.type != "" ) val.type.str <- paste(" ValType=\"", val.type, "\"", sep="")
   else val.type.str <- ""
-  
+
   if (dtime != "") time.str <- paste(" Time=\"", dtime, "\"", sep="")
   else time.str <- ""
 
@@ -1331,9 +1331,9 @@ ddg.MAX_HIST_LINES <- 2^14
   if (length(dvalue) > 1 || !is.atomic(dvalue)) dvalue2 <- "complex"
   else if (!is.null(dvalue)) dvalue2 <- dvalue
   else dvalue2 <- ""
-  
+
   # get value type
-  val.type <- .ddg.get.val.type(value)
+  val.type <- .ddg.get.val.type.string(value)
   
   #print(".ddg.record.data: adding info")
   ddg.data.nodes$ddg.type[ddg.dnum] <- dtype
@@ -1347,65 +1347,110 @@ ddg.MAX_HIST_LINES <- 2^14
   ddg.data.nodes$ddg.loc[ddg.dnum] <- dloc
   ddg.data.nodes$ddg.current[ddg.dnum] <- TRUE
   .ddg.set("ddg.data.nodes", ddg.data.nodes)
-  
+
   # Output data node.
   #print(".ddg.record.data outputting data node")
   .ddg.output.data.node(dtype, dname, dvalue2, val.type, dscope, from.env, dtime, dloc)
-  
+
   if (.ddg.debug.lib()) {
     print(paste("Adding data node", ddg.dnum, "named", dname, "with scope", dscope, " and value ", ddg.data.nodes$ddg.value[ddg.dnum]))
   }
 }
 
 
-# Returns a string representation of the type of the given value.
+# Returns a string representation of the type information of the given value.
+
+.ddg.get.val.type.string <- function(value)
+{
+  val.type <- .ddg.get.val.type(value)
+  
+  if( is.null(val.type) )
+  	return( 'null' )
+  
+  # list, object, environment, function, language
+  if( length(val.type) == 1 )
+  	return( paste('"',val.type,'"',sep="") )
+  
+  # vector, matrix, array, data frame
+  # type information recorded in a list of 3 vectors (container,dimension,type)
+  container <- val.type[[1]]
+  dimension <- val.type[[2]]
+  type <- val.type[[3]]
+  
+  # vector: a 1-dimensional array (uniform typing)
+  if( identical(container,"vector") )
+    return( paste('{"container":"vector", "dimension":[', dimension, '], "type":["' , type, '"]}', sep = "") )
+  
+  # matrix: a 2-dimensional array (uniform typing)
+  if( identical(container,"matrix") )
+  {
+	dimension <- paste( dimension , collapse = "," )
+	return( paste('{"container":"matrix", "dimension":[', dimension, '], "type":["' , type, '"]}', sep = "") )
+  }
+
+  # array: n-dimensional (uniform typing)
+  if( identical(container,"array") )
+  {
+	dimension <- paste( dimension , collapse = "," )
+	return( paste('{"container":"array", "dimension":[', dimension, '], "type":["' , type, '"]}', sep = "") )
+  }
+
+  # data frame: is a type of list
+  dimension <- paste( dimension , collapse = "," )
+  type <- paste( type , collapse = '","' )
+  
+  return( paste('{"container":"data_frame", "dimension":[', dimension, '], "type":["' , type, '"]}', sep = "") )
+}
+
+
+# Returns the type information of the value of the given variable.
+# Does not contain information on dimensions.
+
+.ddg.get.val.type.from.var <- function(var)
+{
+  val.type <- .ddg.get.val.type( get(var) )
+  
+  # remove dimension information, if any
+  if( length(val.type) > 1 )
+  	val.type[2] <- NULL
+  
+  return( val.type )
+}
+
+
+# Returns the type information of the given value, 
+# broken into its parts and returned in a vecctor or a list.
 
 .ddg.get.val.type <- function(value)
 {
   # vector: a 1-dimensional array (uniform typing)
   if(is.vector(value))
-  {
-    type <- class(value)
-    
-    if(length(value) == 1)
-      return(type)
-    else
-      return( paste("vector (" , type , ")" , sep = "") )
-  }
-  
+    return( list("vector", length(value), class(value)) )
+
   # matrix: a 2-dimensional array (uniform typing)
   if(is.matrix(value))
-  {
-    type <- sapply(value,class)[1]
-    return( paste("matrix (" , type , ")" , sep = "") )
-  }
-  
+    return( list("matrix", dim(value), class(value[1])) )
+
   # array: n-dimensional (uniform typing)
   if(is.array(value))
-  {
-    type <- sapply(value,class)[1]
-    return( paste("array (" , type , ")" , sep = "") )
-  }
-  
+  	return( list("array", dim(value), class(value[1])) )
+
   # data frame: is a type of list
   if(is.data.frame(value))
   {
     types <- unname(sapply(value,class))
-    types <- paste(types , collapse = ",")
-    
-    if( is.element("factor",types) )
-      return( paste("data frame with factor (" , types , ")" , sep = "") )
-    else
-      return( paste("data frame (" , types , ")" , sep = "") )
-  }
+    return( unname(list("data_frame", dim(value), types)) )
+ }
   
   # a list
   if(is.list(value))
     return("list")
-  
+    
+  # an object
   if(is.object(value))
     return("object")
-  
+
+  # envrionment, function, language
   if(is.environment(value))
     return("environment")
   if(is.function(value))
@@ -1413,7 +1458,8 @@ ddg.MAX_HIST_LINES <- 2^14
   if(is.language(value))
     return("language")
   
-  return("")
+  # none of the above - null is a character, not NULL or NA
+  return(NULL)
 }
 
 
@@ -3027,7 +3073,15 @@ ddg.MAX_HIST_LINES <- 2^14
           else if (.ddg.is.procedure.cmd(cmd)) {
             .ddg.set(".ddg.possible.last.cmd", NULL)
           }
-
+          
+          # Before evaluating, 
+          # keep track of variable types for common variables between vars.set and vars.used.
+          #common.vars <- intersect( cmd@vars.set , cmd@vars.used )
+          #num.vars <- length(common.vars)
+          
+          #if( num.vars > 0 )
+          #  used.types <- sapply( common.vars , .ddg.get.val.type.from.var )
+          
           # Capture any warnings that occur when an expression is evaluated.
           # Note that we cannot just use a tryCatch here because it behaves
           # slightly differently and we would lose the value that eval
@@ -3037,7 +3091,7 @@ ddg.MAX_HIST_LINES <- 2^14
           # EVALUATE.
 
           if (.ddg.debug.lib()) print (paste (".ddg.parse.commands: Evaluating ", cmd@annotated))
-
+          
           result <- withCallingHandlers(
             eval(cmd@annotated, environ, NULL) ,
             warning = .ddg.set.warning ,
@@ -3051,30 +3105,30 @@ ddg.MAX_HIST_LINES <- 2^14
               vars.set <- .ddg.add.to.vars.set(vars.set,cmd,i)
               if (.ddg.debug.lib()) print(paste(".ddg.parse.commands: Adding", cmd@abbrev, "information to vars.set, for an error"))
               .ddg.create.data.use.edges.for.console.cmd(vars.set, cmd, i, for.caller=FALSE)
-              
+
               # check for factors
-              msg <- e[[1]]
-              
-              if( msg == "invalid 'type' (character) of argument" | msg == "only defined on a data frame with all numeric variables" )
-              {
-                containsFactor <- sapply( cmd@vars.used , .ddg.var.contains.factor )
-                
-                if( is.element(TRUE , containsFactor) )
-                {
-                  factors <- names(containsFactor)[which(containsFactor==TRUE)]
-                  
-                  # form suggestion
-                  cat( "The following input data contain(s) a factor:\n" )
-                  cat( paste(shQuote(factors , type="cmd") , collapse = ", ") )
-                  cat("\nThis website may be helpful:\n")
-                  
-                  #if( msg == "invalid 'type' (character) of argument" )
-                  #  cat("https://stat.ethz.ch/pipermail/r-help/2010-May/239461.html")
-                  #else
-                  #  cat("http://stackoverflow.com/questions/38032814/trying-to-understand-r-error-error-in-funxi-only-defined-on-a-data")
-                	cat( "https://www.r-bloggers.com/using-r-common-errors-in-table-import/" )
-                }
-              }
+              #msg <- e[[1]]
+              #
+              #if( msg == "invalid 'type' (character) of argument" | msg == "only defined on a data frame with all numeric variables" )
+              #{ 
+              #  containsFactor <- sapply( cmd@vars.used , .ddg.var.contains.factor )
+              #  
+              #  if( is.element(TRUE , containsFactor) )
+              #  {
+              #    factors <- names(containsFactor)[which(containsFactor==TRUE)]
+              #
+              #    # form suggestion
+              #    cat( "The following input data contain(s) a factor:\n" )
+              #    cat( paste(shQuote(factors , type="cmd") , collapse = ", ") )
+              #    cat("\nThis website may be helpful:\n")
+              #
+              #    #if( msg == "invalid 'type' (character) of argument" )
+              #    #  cat("https://stat.ethz.ch/pipermail/r-help/2010-May/239461.html")
+              #    #else
+              #    #  cat("http://stackoverflow.com/questions/38032814/trying-to-understand-r-error-error-in-funxi-only-defined-on-a-data")
+              #    cat( "https://www.r-bloggers.com/using-r-common-errors-in-table-import/" )
+              #  }
+              #}
               
               # create and link to an error node
               ddg.exception.out("error.msg", toString(e) , cmd@abbrev)
@@ -3082,7 +3136,48 @@ ddg.MAX_HIST_LINES <- 2^14
           )
 
           if (.ddg.debug.lib()) print (paste (".ddg.parse.commands: Done evaluating ", cmd@annotated))
-
+          
+          # After evaluating
+          # Check changes to variable type for common variables between vars.set and vars.used
+          #if( num.vars > 0 )
+          #{
+          #  set.types <- sapply( common.vars , .ddg.get.val.type.from.var )
+          #  
+          #  # comparing type changes for variables set and variables used
+          #  # only 1 common variable between vars.set and vars.used
+          #  if( num.vars == 1 )
+          #  {
+          #    is.same <- identical( set.types , used.types )
+          #    
+          #    # remember var names for vars whose types have changed, NULL otherwise
+          #    if(is.same)
+          #      changed.vars <- NULL
+          #    else
+          #      changed.vars <- common.vars
+          #  }
+          #
+          #  # multiple common variables between vars.set and vars.used
+          #  # currently untested since multiple variable assignment is not working!
+          #  else
+          #  {
+          #    is.same <- mapply( identical , set.types , used.types )
+          #    changed.vars <- names(is.same)[which(is.same==FALSE)]
+          #    
+          #    # convert to string
+          #    if( ! is.null(changed.vars) )
+          #      changed.vars <- paste( changed.vars , collapse = "," )
+          #  }
+          #  
+          #  # show warning message
+          #  if( ! is.null(changed.vars) )
+          #  { 
+          #    msg <- paste( "For the statement \"" , cmd@text , "\", " , "in line " , cmd@pos@startLine , ",\n" , sep = "" )
+          #    msg <- paste( msg , "The type changed for the following variables: " , changed.vars , sep = "" )
+          #    
+          #    warning( msg , call. = FALSE )
+          #  }
+          #}
+          
           if (!cmd@isDdgFunc && cmd@text != "next") {
             # Need to get the stack again because it could have been
             # modified during the eval call.
@@ -3141,7 +3236,7 @@ ddg.MAX_HIST_LINES <- 2^14
 
           .ddg.proc.node("Operation", cmd@abbrev, cmd@abbrev, env=environ, console=TRUE, cmd=cmd)
           .ddg.proc2proc()
-
+          
           # If a warning occurred when cmd was evaluated,
           # attach a warning node
           if (.ddg.warning.occurred()) {
@@ -3164,7 +3259,7 @@ ddg.MAX_HIST_LINES <- 2^14
 
           if (cmd@readsFile) .ddg.create.file.read.nodes.and.edges(cmd, environ)
           .ddg.link.function.returns(cmd)
-
+          
           if (.ddg.debug.lib()) print(paste(".ddg.parse.commands: Adding input data nodes for", cmd@abbrev))
 
           .ddg.create.data.set.edges.for.cmd(vars.set, cmd, i, d.environ)
@@ -3240,7 +3335,7 @@ ddg.MAX_HIST_LINES <- 2^14
 .ddg.var.contains.factor <- function( var )
 {
   value <- get(var)
-  
+
   if( is.data.frame(value) )
     return( is.element("factor",sapply(value,class)) )
 
@@ -3419,7 +3514,7 @@ ddg.MAX_HIST_LINES <- 2^14
   #print(paste(".ddg.data.node: dvalue =", dvalue))
   #print(paste(".ddg.data.node: dscope =", dscope))
   # If object or a long list, try to create snapshot node.
-  
+
   if (is.object(dvalue)) {
     #print(".ddg.data.node: is object")
     tryCatch(
@@ -3556,9 +3651,9 @@ ddg.MAX_HIST_LINES <- 2^14
 # dscope (optional) - scope of data node.
 
 .ddg.snapshot.node <- function(dname, fext, data, save.object = FALSE, dscope=NULL, from.env=FALSE) {
-  
+
   orig.data <- data
-  
+
   # Determine if we should save the entire data
   max.snapshot.size <- ddg.max.snapshot.size()
 
@@ -3693,7 +3788,7 @@ ddg.MAX_HIST_LINES <- 2^14
 # dscope (optional) - scope of data node.
 
 .ddg.file.node <- function(dtype, fname, dname, dscope=NULL) {
-  
+
   # Get original file location.
   file.name <- basename(fname)
   file.loc <- normalizePath(fname, winslash="/", mustWork = FALSE)
