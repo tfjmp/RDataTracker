@@ -23,15 +23,16 @@
 \alias{ddg.loop.annotate.on}
 \alias{ddg.loop.annotate.off}
 \alias{ddg.details.omitted}
+\alias{ddg.library}
 \title{Creating Provenance Graphs with RDataTracker}
 \description{These functions are needed to create provenance graphs.}
 \usage{
 ddg.init(r.script.path = NULL, ddgdir = NULL, overwrite = TRUE, enable.console = TRUE, 
-    max.snapshot.size = 10) 
+   annotate.inside = TRUE, first.loop = 1, max.loops = 1, max.snapshot.size = 10, annotate.packages = FALSE) 
 ddg.save(r.script.path = NULL, save.debug=FALSE, quit=FALSE)
 ddg.run(r.script.path = NULL, ddgdir = NULL, overwrite = TRUE, f = NULL, enable.console = TRUE, 
-    annotate.inside = TRUE, first.loop = 1, max.loops = 1, max.snapshot.size = 10, debug = FALSE, 
-    save.debug=FALSE, display = FALSE)
+    annotate.inside = TRUE, first.loop = 1, max.loops = 1, max.snapshot.size= 10, annotate.packages = FALSE, 
+    debug = FALSE, save.debug=FALSE, display = FALSE)
 ddg.set.detail(detail.level)
 ddg.get.detail()
 ddg.clear.detail()
@@ -53,6 +54,7 @@ ddg.loop.annotate()
 ddg.loop.annotate.on()
 ddg.loop.annotate.off()
 ddg.details.omitted()
+ddg.library(pkg.name)
 }
 \arguments{
   \item{r.script.path}{ the full path to the file containing the R script that is being executed. }
@@ -68,6 +70,7 @@ ddg.details.omitted()
   \item{max.snapshot.size}{ The maximum size for objects that should be output in snapshot
     files.  If max.snapshot.size is -1, there is no limit. If max.snapshot.size is 0, snapshot nodes
     are created but no snapshot files are saved. }
+  \item{annotate.packages}{ If TRUE, enable annotation of functions from loaded packages. }
   \item{debug}{ If TRUE, enable script debugging. }
   \item{save.debug}{ If TRUE, save debug files to debug directory. }
   \item{display}{ If TRUE, display the DDG when the R script completes.}
@@ -78,6 +81,7 @@ ddg.details.omitted()
   \item{ddg.path}{ The path to the DDG directory which needs to be flushed. }
   \item{index.var}{ The index variable passed to ddg.forloop. }
   \item{loop.num}{ The loop number passed to ddg.loop.count and ddg.reset.loop.count. }
+  \item{pkg.name}{ Name of package to annotate. }
 }
 \details{
   In order to use RDataTracker to collect data provenance, the user must either call ddg.init 
@@ -140,7 +144,8 @@ ddg.details.omitted()
   the function returns "DDG not available".
   
   ddg.forloop, ddg.first.loop, ddg.loop.count, ddg.loop.count.inc, ddg.reset.loop.count, ddg.loop.annotate,
-  ddg.loop.annotate.on, ddg.loop.annotate.off, and ddg.details.omitted are used internally by RDataTracker--do not use.
+  ddg.loop.annotate.on, ddg.loop.annotate.off, ddg.details.omitted, and ddg.library are used internally by 
+  RDataTracker--do not use.
 }
 \author{Emery Boose and Barbara Lerner}
 \examples{
