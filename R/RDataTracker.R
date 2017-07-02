@@ -1223,37 +1223,118 @@ ddg.MAX_HIST_LINES <- 2^14
 
 
 # .ddg.data.objects returns a list of data objects used or created by
-# the script. The list includes node number, name, value, type, scope,
-# line number (if any) where the object was created, and line numbers(s)
-# (if any) where the object was used. The scope is set to ENV if the
-# object was not created by the script and was taken from the pre
-# -existing environment.
+# the script. The list includes node number, name, value, scope, R type, 
+# node type, line number (if any) where the object was created, line 
+# numbers(s) (if any) where the object was used, and location and md5sum 
+# hash (for files read or written by the script).
 
 .ddg.data.objects <- function() {
-  # Get data node, procedure node, and edge tables.
+  # Get data node, procedure node, and edge tables
   dnodes <- .ddg.data.nodes()
   pnodes <- .ddg.proc.nodes()
   edges <- .ddg.edges()
 
   # Subset data node table
   dnum <- .ddg.dnum()
-  dinv <- dnodes[1:dnum , c("ddg.num", "ddg.name", "ddg.value", "ddg.type", "ddg.scope")]
+  dinv <- dnodes[1:dnum , c("ddg.num", "ddg.name", "ddg.value",  "ddg.scope", "ddg.val.type","ddg.type", "ddg.loc", "ddg.type")]
 
-  # Replace scope with ENV if from initial environment
-  index <- which(dnodes$ddg.from.env==TRUE)
-  if (length(index) > 0) {
-    dinv$ddg.scope[index] <- "ENV"
+  # Update scope
+  for (i in 1:nrow(dinv)) {
+    # simplify to: global, local, undefined
+    if (dinv$ddg.scope[i] == "R_GlobalEnv") {
+      dinv$ddg.scope[i] <- "global"
+    }
+    else if (dinv$ddg.scope[i] != "undefined") {
+      dinv$ddg.scope[i] <- "local"
+    }
   }
 
-  # Rename columns
-  colnames(dinv) <- c("node", "name", "value", "type", "scope")
+  # Upate value
+  for (i in 1:nrow(dinv)) {
+    st <- as.character(dinv$ddg.value[i])
+    # remove backslashes
+    st <- gsub("\\\\", "", st)
+    # remove path
+    z <- strsplit(st, "/")
+      if (length(z[[1]]) > 1) {
+       st <- z[[1]][[2]]
+     }
+    dinv$ddg.value[i] <- st
+  }
 
-  return(dinv)
+  # Update value type
+  for (i in 1:nrow(dinv)) {
+    st <- as.character(dinv$ddg.val.type[i])
+    # remove quotes
+    st <- gsub("\"", "", st)
+    if (substr(st, 1, 1) == "{") {
+      # get container value
+      x <- strsplit(st, ",")
+      z <- strsplit(x[[1]][[1]], ":")
+      st <- z[[1]][[2]]
+    }
+    dinv$ddg.val.type[i] <- st
+  }
+
+  # Get line number where created
+  dinv$created <- ""
+  for (i in 1:nrow(dinv)) {
+    dnode <- paste("d", i, sep="")
+    index <- which(edges$ddg.to == dnode)
+    if (length(index) > 0 ) {
+      pnode <- edges$ddg.from[index]
+      pnum <- substr(pnode, 2, nchar(pnode))
+      snum <- pnodes$ddg.snum[pnodes$ddg.num == pnum]
+      lnum <- pnodes$ddg.startLine[pnodes$ddg.num == pnum]
+      if (!is.na(pnum) & !is.na(snum) & !is.na(lnum)) {
+        if (as.numeric(snum) > 0) line <- paste(snum, ":", lnum, sep="")
+        else line <- lnum
+        dinv$created[i] <- line
+      }
+    }
+  }
+
+  # Get line number(s) where used
+  dinv$used <- ""
+  for (i in 1:nrow(dinv)) {
+    dnode <- paste("d", i, sep="")
+    index <- which(edges$ddg.from == dnode)
+    lines <- NULL
+    if (length(index) > 0 ) {
+      for (j in 1:length(index)) {
+        pnode <- edges$ddg.to[index[j]]
+        pnum <- substr(pnode, 2, nchar(pnode))
+        snum <- pnodes$ddg.snum[pnodes$ddg.num == pnum]
+        lnum <- pnodes$ddg.startLine[pnodes$ddg.num == pnum]
+        if (!is.na(pnum) & !is.na(snum) & !is.na(lnum)) {
+          if (as.numeric(snum) > 0) line <- paste(snum, ":", lnum, sep="")
+          else line <- lnum
+          lines <- append(lines, line)
+        }
+      }
+      lines <- unique(lines)
+      lines <- paste(lines, collapse=" ")
+      dinv$used[i] <- lines
+    }
+  }
+
+  # Get md5sum hash for files (NOTE: replace when hash table code is available)
+  dinv$hash <- ""
+  index <- which(dinv$ddg.type == "File")
+  if (length(index) > 0) {
+    for (i in 1:length(index)) {
+      fname <- dinv$ddg.loc[index[i]]
+      dinv$hash[index[i]] <- tools::md5sum(fname)
+    }
+  }
+
+  # Rearrange & rename columns
+  dinv2 <- data.frame(dinv$ddg.num, dinv$ddg.name, dinv$ddg.value, dinv$ddg.scope, dinv$ddg.val.type, dinv$ddg.type, dinv$created, dinv$used, dinv$ddg.loc, dinv$hash)
+  colnames(dinv2) <- c("num", "name", "value", "scope", "r.type", "node.type", "line.created", "lines.used", "file.path", "file.md5sum")
+
+  return(dinv2)
 }
 
-# .ddg.is.init is called at the beginning of all user accessible
-# functions. It verifies that a DDG has been initialized. If it
-# hasn't, it returns FALSE.
 
 .ddg.is.init <- function() {
     # Short circuits evaluation.
