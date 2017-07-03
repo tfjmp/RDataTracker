@@ -869,23 +869,23 @@ ddg.MAX_HIST_LINES <- 2^14
 # .ddg.get.last.start.line gets the last known start line from the
 # procedure nodes table.
 
-.ddg.get.last.start.line <- function(i) {
+.ddg.get.last.start.line <- function(pnum) {
   pnodes <- .ddg.proc.nodes()
   repeat {
-    i <- i - 1
-    if (i == 0) return(NA)
-    start <- pnodes[i, "ddg.startLine"]
+    pnum <- pnum - 1
+    if (pnum == 0) return(NA)
+    start <- pnodes[pnum, "ddg.startLine"]
     if (!is.na(start)) return(start)
   }
 }
 
 # .ddg.get.start.line gets the start line from the procedure nodes table.
 
-.ddg.get.start.line <- function(i) {
+.ddg.get.start.line <- function(pnum) {
   pnodes <- .ddg.proc.nodes()
-  snum <- pnodes[i, "ddg.snum"]
-  start <- pnodes[i, "ddg.startLine"]
-  if (is.na(start)) start <- .ddg.get.last.start.line(i)
+  snum <- pnodes[pnum, "ddg.snum"]
+  start <- pnodes[pnum, "ddg.startLine"]
+  if (is.na(start)) start <- .ddg.get.last.start.line(pnum)
   if (!is.na(start)) {
     if (is.na(snum) | snum == 0) lnum <- start
     else lnum <- paste(snum, ":", start, sep="")
@@ -893,7 +893,7 @@ ddg.MAX_HIST_LINES <- 2^14
   return(lnum)
 }
   
-# .ddg.format.data.value formats the data value for ddg-summary.txt.
+# .ddg.format.data.value formats a data value.
 
 .ddg.format.data.value <- function(dvalue) {
   st <- as.character(dvalue)
@@ -907,42 +907,9 @@ ddg.MAX_HIST_LINES <- 2^14
   return(st)
 }
 
-# .ddg.check.for.random.seed checks for functions that create a
-# random number seed.
+# .ddg.write.elapsed.time writes elapsed time.
 
-.ddg.check.for.random.seed <- function(pname) {
-  fseed <- c("set.seed")
-  for (i in 1:length(fseed)) {
-    if (grepl(fseed[i], pname)) return(TRUE)
-  }
-  return(FALSE)
-}
-
-# .ddg.check.for.input.file checks for functions that read files.
-
-.ddg.check.for.input.file <- function(pname) {
-  finput <- c("read.csv", "read.table", "readLines")
-  for (i in 1:length(finput)) {
-    if (grepl(finput[i], pname)) return(TRUE)
-  }
-  return(FALSE)
-}
-
-# .ddg.check.for.output.file checks for functions that write files.
-
-.ddg.check.for.output.file <- function(pname) {
-  foutput <- c("write.csv", "write.table", "writeLines", "dev.off")
-  for (i in 1:length(foutput)) {
-    if (grepl(foutput[i], pname)) return(TRUE)
-  }
-  return(FALSE)
-}
-
-# .ddg.record.elapsed.time records elapsed time.
-
-.ddg.record.elapsed.time <- function(fileout) {
-  writeLines("ELAPSED TIME", fileout)
-  writeLines("", fileout)
+.ddg.write.elapsed.time <- function(fileout) {
   pnodes <- .ddg.proc.nodes()
   prows <- .ddg.pnum()
   time.start <- pnodes[1, "ddg.time"]
@@ -953,12 +920,9 @@ ddg.MAX_HIST_LINES <- 2^14
   writeLines("", fileout)
 }
 
-# .ddg.record.errors.warnings records error and warning messages.
+# .ddg.write.errors.warnings writes error and warning messages.
 
-.ddg.record.errors.warnings <- function(type, fileout) {
-  if (type == "error.msg") writeLines("ERRORS", fileout)
-  else if (type == "warning.msg") writeLines("WARNINGS", fileout)
-  writeLines("", fileout)
+.ddg.write.errors.warnings <- function(type, fileout) {
   dnodes <- .ddg.data.nodes()
   edges <- .ddg.edges()
   drows <- .ddg.dnum()
@@ -979,7 +943,7 @@ ddg.MAX_HIST_LINES <- 2^14
       writeLines("", fileout)
     }
   }
- 
+
   if (count == 0) {
     if (type == "error.msg") writeLines("No errors", fileout)
     else if (type == "warning.msg") writeLines("No warnings", fileout)
@@ -987,110 +951,132 @@ ddg.MAX_HIST_LINES <- 2^14
   }
 }
 
-# .ddg.record.random.number.seeds records statements that set a random
+# .ddg.check.for.random.seed checks for functions that create a
+# random number seed.
+
+.ddg.check.for.random.seed <- function(pname) {
+  fseed <- c("set.seed")
+  for (i in 1:length(fseed)) {
+    if (grepl(fseed[i], pname)) return(TRUE)
+  }
+  return(FALSE)
+}
+
+# .ddg.write.random.number.seeds writes statements that set a random
 # number seed.
 
-.ddg.record.random.number.seeds <- function(fileout) {
+.ddg.write.random.number.seeds <- function(fileout) {
   pnodes <- .ddg.proc.nodes()
   prows <- .ddg.pnum()
-  seeds <- 0
-  for (i in 1:prows) {
-    # get procedure if operation
-    if (pnodes[i, "ddg.type"] == "Operation") {
-      pname <- pnodes[i, "ddg.name"]
+  count <- 0
+  for (pnum in 1:prows) {
+    # check for operation
+    if (pnodes[pnum, "ddg.type"] == "Operation") {
+      pname <- pnodes[pnum, "ddg.name"]
      
       # check for match
       match <- .ddg.check.for.random.seed(pname)
 
       # process if match
       if (match) {
-        seeds <- seeds + 1
-        lnum <- .ddg.get.start.line(i)
+        count <- count + 1
+        lnum <- .ddg.get.start.line(pnum)
         st <- paste("Line ", lnum, ": ", pname)
         writeLines(st, fileout)
         writeLines("", fileout)
       }
     }
   }
-  if (seeds == 0) {
+
+  if (count == 0) {
     writeLines("No random number seeds", fileout)
     writeLines("", fileout)
   }
 }
 
-# .ddg.record.files records files that are read or written.
+# .ddg.write.file.statement writes statements that input or
+# output files.
 
-.ddg.record.files <- function(lnum, dtype, dname, dvalue, dloc, fileout) {
-  # files read or written by script
-  if (dtype == "File") {
-    st <- paste("Line ", lnum, ": ", dname, " = ", dloc)
-    writeLines(st, fileout)
+.ddg.write.file.statement <- function(dnum, pnum, fileout) {
+  dnodes <- .ddg.data.nodes()
+  dname <- dnodes[dnum, "ddg.name"]
+  dloc <- dnodes[dnum, "ddg.loc"]
+  md5sum <- tools::md5sum(dloc)
+  lnum <- .ddg.get.start.line(pnum)
+  st <- paste("Line ", lnum , ":  ", dname, " = ", dloc, sep="")
+  writeLines(st, fileout)
+  st <- paste("md5sum: ", md5sum, sep="")
+  writeLines(st, fileout)
+  writeLines("", fileout)
+}
 
-    dhash <- tools::md5sum(dloc)
-    st <- paste("md5sum:  ", dhash, sep="")
-    writeLines(st, fileout)
-    
-  # snapshot files
-  } else {
-    st <- paste("Line ", lnum, ": ", dname, " = ", dvalue, sep="")
-    writeLines(st, fileout)
+# .ddg.write.input.files collects information on statements
+# that read files.
+
+.ddg.write.input.files <- function(fileout) {
+  dnodes <- .ddg.data.nodes()
+  pnodes <- .ddg.proc.nodes()
+  edges <- .ddg.edges()
+  drows <- .ddg.dnum()
+  count <- 0
+
+  for (dnum in 1:drows) {
+    # check for input files
+    if (dnodes[dnum, "ddg.type"] == "File") {
+      dnode <- paste("d", dnum, sep="")
+      index <- which(edges$ddg.type == "df.in" & edges$ddg.from == dnode)
+      if (length(index) > 0) {
+        for (j in 1:length(index)) {
+          count <- count + 1
+          pname <- pnodes[index[j], "ddg.name"]
+          pnode <- edges[index[j], "ddg.to"]
+          pnum <- as.numeric(substr(pnode, 2, nchar(pnode)))
+          .ddg.write.file.statement(dnum, pnum, fileout)
+        }
+     }
+   }
+  }
+
+  if (count == 0) {
+    writeLines("No input files", fileout)
+    writeLines("", fileout)
   }
 }
 
-# .ddg.find.files finds files that are read or written.
+# .ddg.write.output.files collects information on statements
+# that write files.
 
-.ddg.locate.files <- function(type, fileout) {
-  pnodes <- .ddg.proc.nodes()
-  prows <- .ddg.pnum()
-  files <- 0
-  for (i in 1:prows) {
-    # get procedure if operation
-    if (pnodes[i, "ddg.type"] == "Operation") {
-      pname <- pnodes[i, "ddg.name"]
+.ddg.write.output.files <- function(fileout) {
+  dnodes <- .ddg.data.nodes()
+  edges <- .ddg.edges()
+  drows <- .ddg.dnum()
+  count <- 0
 
-      # check for match
-      if (type == "input") {
-        match <- .ddg.check.for.input.file(pname)
-      } else {
-        match <- .ddg.check.for.output.file(pname)
-      }
-    
-      # process if match
-      if (match) {
-        dnodes <- .ddg.data.nodes()
-        edges <- .ddg.edges()
-        lnum <- .ddg.get.start.line(i)
-        pnode <- paste("p", i, sep="")
-        index <- which(edges$ddg.type == "df.out" & edges$ddg.from == pnode)
-      
-        if (length(index) > 0) {
-          for (j in 1:length(index)) {
-            files <- files + 1
-            dnode <- edges$ddg.to[index[j]]
-            dnum <- as.numeric(substr(dnode, 2, nchar(dnode)))
-            dtype <- dnodes[dnum, "ddg.type"]
-            dname <- dnodes[dnum, "ddg.name"]
-            dvalue <- .ddg.format.data.value(dnodes[dnum, "ddg.value"])
-            dloc <- dnodes[dnum, "ddg.loc"]
-            .ddg.record.files(lnum, dtype, dname, dvalue, dloc, fileout)
-            writeLines("", fileout)
-          }
-        }
-      }
-    }
+  for (dnum in 1:drows) {
+    # check for output files
+    if (dnodes[dnum, "ddg.type"] == "File") {
+      dnode <- paste("d", dnum, sep="")
+      index <- which(edges$ddg.type == "df.out" & edges$ddg.to == dnode)
+      if (length(index) > 0) {
+        count <- count + 1
+        pnode <- edges[index, "ddg.from"]
+        pnum <- as.numeric(substr(pnode, 2, nchar(pnode)))
+        .ddg.write.file.statement(dnum, pnum, fileout)
+     }
+   }
   }
-  if (files == 0) {
-    if (type == "input") writeLines("No input files", fileout)
-    else if (type == "output") writeLines("No output files", fileout)
+
+  if (count == 0) {
+    writeLines("No output files", fileout)
     writeLines("", fileout)
   }
 }
 
 # .ddg.summary.txt.write writes a summary of the ddg to the file
 # ddg-summary.txt on the ddg directory. It uses the procedure node,
-# data node, and edges tables to locate selected portions of the ddg.
-# It also uses lists of function names to identify functions that 
-# read files, write files, or set random number seeds.
+# data node, and edges tables to extract information about the ddg. 
+# It also uses a list of function names to identify functions that 
+# set random number seeds.
 
 .ddg.summary.txt.write <- function() {
   # set output file
@@ -1104,25 +1090,31 @@ ddg.MAX_HIST_LINES <- 2^14
   writeLines(st, fileout)
 
   # write elapsed time
-  .ddg.record.elapsed.time(fileout)
+  writeLines("ELAPSED TIME", fileout)
+  writeLines("", fileout)
+  .ddg.write.elapsed.time(fileout)
 
   # write errors
-  .ddg.record.errors.warnings("error.msg", fileout)
+  writeLines("ERRORS", fileout)
+  writeLines("", fileout)
+  .ddg.write.errors.warnings("error.msg", fileout)
 
   # write warnings
-  .ddg.record.errors.warnings("warning.msg", fileout)
+  writeLines("WARNINGS", fileout)
+  writeLines("", fileout)
+  .ddg.write.errors.warnings("warning.msg", fileout)
 
   # write inputs
   writeLines("INPUTS", fileout)
   writeLines("", fileout)
-  .ddg.record.random.number.seeds(fileout)
-  .ddg.locate.files("input", fileout)
-
+  .ddg.write.random.number.seeds(fileout)
+  .ddg.write.input.files(fileout)
+ 
   # write outputs
   writeLines("OUTPUTS", fileout)
   writeLines("", fileout)
-  .ddg.locate.files("output", fileout)
-
+  .ddg.write.output.files(fileout)
+ 
   # close file
   close(fileout)
 }
