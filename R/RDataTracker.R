@@ -371,6 +371,7 @@ ddg.MAX_HIST_LINES <- 2^14
           ddg.value = character(size),
           ddg.return.linked = logical(size),
           ddg.auto.created = logical(size),
+          ddg.random.seed = character(size),
           ddg.time = numeric(size),
           ddg.snum = numeric(size),
           ddg.startLine = numeric(size),
@@ -644,7 +645,7 @@ ddg.MAX_HIST_LINES <- 2^14
   if (!is.null(ddg.r.script.path)) {
     environ <- paste(environ, "Script=\"", ddg.r.script.path, "\"\n", sep="")
     environ <- paste(environ, "SourcedScripts=\"", .ddg.sourced.script.names(), "\"\n", sep="")
-    environ <- paste(environ, "ProcessFileTimestamp=\"", .ddg.format.time(file.info(ddg.r.script.path)$mtime), "\"\n", sep="")
+    environ <- paste(environ, "ScriptTimestamp=\"", .ddg.format.time(file.info(ddg.r.script.path)$mtime), "\"\n", sep="")
     #print(paste(".ddg.txt.environ: .ddg.sourced.script.names() = ", .ddg.sourced.script.names()))
     stimes <- .ddg.sourced.script.timestamps()
     if (stimes != "") {
@@ -899,11 +900,10 @@ ddg.MAX_HIST_LINES <- 2^14
   st <- as.character(dvalue)
   # remove backslashes
   st <- gsub("\\\\", "", st)
-  # remove path
-  z <- strsplit(st, "/")
-  if (length(z[[1]]) > 1) {
-    st <- z[[1]][[2]]
-  }
+  # shorten if necessary
+  if (nchar(st) > 255) st <- substr(st, 1, 255)
+  # remove snapshot path
+  if (dirname(st) == "data") st <- basename(st)
   return(st)
 }
 
@@ -951,17 +951,6 @@ ddg.MAX_HIST_LINES <- 2^14
   }
 }
 
-# .ddg.check.for.random.seed checks for functions that create a
-# random number seed.
-
-.ddg.check.for.random.seed <- function(pname) {
-  fseed <- c("set.seed")
-  for (i in 1:length(fseed)) {
-    if (grepl(fseed[i], pname)) return(TRUE)
-  }
-  return(FALSE)
-}
-
 # .ddg.write.random.number.seeds writes statements that set a random
 # number seed.
 
@@ -970,26 +959,91 @@ ddg.MAX_HIST_LINES <- 2^14
   prows <- .ddg.pnum()
   count <- 0
   for (pnum in 1:prows) {
-    # check for operation
-    if (pnodes[pnum, "ddg.type"] == "Operation") {
-      pname <- pnodes[pnum, "ddg.name"]
-     
-      # check for match
-      match <- .ddg.check.for.random.seed(pname)
-
-      # process if match
-      if (match) {
-        count <- count + 1
-        lnum <- .ddg.get.start.line(pnum)
-        st <- paste("Line ", lnum, ": ", pname)
-        writeLines(st, fileout)
-        writeLines("", fileout)
-      }
+    # check if random number seed is set
+    random.seed <- pnodes[pnum, "ddg.random.seed"]
+    if (random.seed != "") {
+      count <- count + 1
+      lnum <- .ddg.get.start.line(pnum)
+      st <- paste("Line ", lnum, sep="")
+      writeLines(st, fileout)
+      st <- paste("Random number seed = ", random.seed, sep="")
+      writeLines(st, fileout)
+      writeLines("", fileout)
     }
   }
 
   if (count == 0) {
     writeLines("No random number seeds", fileout)
+    writeLines("", fileout)
+  }
+}
+
+# .ddg.write.url.snapshot writes information on snapshots
+# created from reading urls.
+
+.ddg.write.url.snapshot <- function(pnum, fileout) {
+  dnodes <- .ddg.data.nodes()
+  edges <- .ddg.edges()
+  pnode <- paste("p", pnum, sep="")
+  index <- which(edges$ddg.type == "df.out" & edges$ddg.from == pnode)
+  if (length(index) > 0) {
+    dnode <- edges[index, "ddg.to"]
+    dnum <- as.numeric(substr(dnode, 2, nchar(dnode)))
+    if (dnodes[dnum, "ddg.type"] == "Snapshot") {
+      dvalue <- .ddg.format.data.value(dnodes[dnum, "ddg.value"])
+      dpath <- paste(.ddg.path(), "/data/", dvalue, sep="")
+      md5sum <- tools::md5sum(dpath)
+      st <- paste("Snapshot = ", dvalue, sep="")
+      writeLines(st, fileout)
+      st <- paste("md5sum = ", md5sum, sep="")
+      writeLines(st, fileout)
+    }
+  }
+}
+
+# .ddg.write.url.statement writes statements that read urls.
+
+.ddg.write.url.statement <- function(dnum, pnum, fileout) {
+  dnodes <- .ddg.data.nodes()
+  dname <- dnodes[dnum, "ddg.name"]
+  lnum <- .ddg.get.start.line(pnum)
+  st <- paste("Line ", lnum, sep="")
+  writeLines(st, fileout)
+  st <- paste("URL = ", dname, sep="")
+  writeLines(st, fileout)
+  .ddg.write.url.snapshot(pnum, fileout)
+  writeLines("", fileout)
+}
+
+# .ddg.write.input.urls collects information on statements
+# that read urls
+
+.ddg.write.input.urls <- function(fileout) {
+  dnodes <- .ddg.data.nodes()
+  pnodes <- .ddg.proc.nodes()
+  edges <- .ddg.edges()
+  drows <- .ddg.dnum()
+  count <- 0
+
+  for (dnum in 1:drows) {
+    # check for input urls
+    if (dnodes[dnum, "ddg.type"] == "URL") {
+      dnode <- paste("d", dnum, sep="")
+      index <- which(edges$ddg.type == "df.in" & edges$ddg.from == dnode)
+      if (length(index) > 0) {
+        for (j in 1:length(index)) {
+          count <- count + 1
+          pname <- pnodes[index[j], "ddg.name"]
+          pnode <- edges[index[j], "ddg.to"]
+          pnum <- as.numeric(substr(pnode, 2, nchar(pnode)))
+          .ddg.write.url.statement(dnum, pnum, fileout)
+        }
+     }
+   }
+  }
+
+  if (count == 0) {
+    writeLines("No input urls", fileout)
     writeLines("", fileout)
   }
 }
@@ -1000,12 +1054,17 @@ ddg.MAX_HIST_LINES <- 2^14
 .ddg.write.file.statement <- function(dnum, pnum, fileout) {
   dnodes <- .ddg.data.nodes()
   dname <- dnodes[dnum, "ddg.name"]
+  dvalue <- .ddg.format.data.value(dnodes[dnum, "ddg.value"])
   dloc <- dnodes[dnum, "ddg.loc"]
   md5sum <- tools::md5sum(dloc)
   lnum <- .ddg.get.start.line(pnum)
-  st <- paste("Line ", lnum , ":  ", dname, " = ", dloc, sep="")
+  st <- paste("Line ", lnum, sep="")
   writeLines(st, fileout)
-  st <- paste("md5sum: ", md5sum, sep="")
+  st <- paste("File = ", dloc, sep="")
+  writeLines(st, fileout)
+  st <- paste("Snapshot = ", dvalue, sep="")
+  writeLines(st, fileout)
+  st <- paste("md5sum = ", md5sum, sep="")
   writeLines(st, fileout)
   writeLines("", fileout)
 }
@@ -1033,7 +1092,7 @@ ddg.MAX_HIST_LINES <- 2^14
           pnum <- as.numeric(substr(pnode, 2, nchar(pnode)))
           .ddg.write.file.statement(dnum, pnum, fileout)
         }
-     }
+      }
    }
   }
 
@@ -1078,6 +1137,8 @@ ddg.MAX_HIST_LINES <- 2^14
 # It also uses a list of function names to identify functions that 
 # set random number seeds.
 
+# NOTE: replace calls to md5sum when hash table code is available
+
 .ddg.summary.txt.write <- function() {
   # set output file
   fname <- paste(.ddg.path(), "/ddg-summary.txt", sep="")
@@ -1108,6 +1169,7 @@ ddg.MAX_HIST_LINES <- 2^14
   writeLines("INPUTS", fileout)
   writeLines("", fileout)
   .ddg.write.random.number.seeds(fileout)
+  .ddg.write.input.urls(fileout) 
   .ddg.write.input.files(fileout)
  
   # write outputs
@@ -1228,7 +1290,7 @@ ddg.MAX_HIST_LINES <- 2^14
 
   # Subset data node table
   dnum <- .ddg.dnum()
-  dinv <- dnodes[1:dnum , c("ddg.num", "ddg.name", "ddg.value",  "ddg.scope", "ddg.val.type","ddg.type", "ddg.loc", "ddg.type")]
+  dinv <- dnodes[1:dnum , c("ddg.num", "ddg.type", "ddg.name", "ddg.value",  "ddg.scope", "ddg.val.type","ddg.type", "ddg.loc")]
 
   # Update scope
   for (i in 1:nrow(dinv)) {
@@ -1246,11 +1308,10 @@ ddg.MAX_HIST_LINES <- 2^14
     st <- as.character(dinv$ddg.value[i])
     # remove backslashes
     st <- gsub("\\\\", "", st)
-    # remove path
-    z <- strsplit(st, "/")
-      if (length(z[[1]]) > 1) {
-       st <- z[[1]][[2]]
-     }
+    # shorten if necessary
+    if (nchar(st) > 255) st <- substr(st, 1, 255)
+    # remove snapshot path
+    if (dirname(st) == "data") st <- basename(st)
     dinv$ddg.value[i] <- st
   }
 
@@ -1278,7 +1339,7 @@ ddg.MAX_HIST_LINES <- 2^14
       pnum <- substr(pnode, 2, nchar(pnode))
       snum <- pnodes$ddg.snum[pnodes$ddg.num == pnum]
       lnum <- pnodes$ddg.startLine[pnodes$ddg.num == pnum]
-      if (!is.na(pnum) & !is.na(snum) & !is.na(lnum)) {
+      if (!is.na(snum) & !is.na(lnum) & !is.na(lnum)) {
         if (as.numeric(snum) > 0) line <- paste(snum, ":", lnum, sep="")
         else line <- lnum
         dinv$created[i] <- line
@@ -1321,8 +1382,8 @@ ddg.MAX_HIST_LINES <- 2^14
   }
 
   # Rearrange & rename columns
-  dinv2 <- data.frame(dinv$ddg.num, dinv$ddg.name, dinv$ddg.value, dinv$ddg.scope, dinv$ddg.val.type, dinv$ddg.type, dinv$created, dinv$used, dinv$ddg.loc, dinv$hash)
-  colnames(dinv2) <- c("num", "name", "value", "scope", "r.type", "node.type", "line.created", "lines.used", "file.path", "file.md5sum")
+  dinv2 <- data.frame(dinv$ddg.num, dinv$ddg.type, dinv$ddg.name, dinv$ddg.value, dinv$ddg.scope, dinv$ddg.val.type, dinv$created, dinv$used, dinv$ddg.loc, dinv$hash)
+  colnames(dinv2) <- c("num", "node.type", "name", "value", "scope", "r.type", "line.created", "lines.used", "file.path", "file.md5sum")
 
   return(dinv2)
 }
@@ -1533,6 +1594,26 @@ ddg.MAX_HIST_LINES <- 2^14
   })
 }
 
+#.ddg.is.open.connection returns TRUE if a value is an open connection.
+
+.ddg.is.open.connection <- function(value) {
+  if ("connection" %in% class(value)) {
+    tryCatch({
+      isOpen(value)
+      return(TRUE)
+    }, error = function(e) {
+      return(FALSE)
+    })
+  }
+  return(FALSE)
+}
+
+# .ddg.get.connection.description returns the connection description.
+
+.ddg.get.connection.description <- function(value) {
+  return(summary(value)$description)
+}
+
 # .ddg.save.data takes as input the name and value of a data node
 # that needs to be created. It determines how the data should be
 # output (or saved) and saves it in that format.
@@ -1561,6 +1642,7 @@ ddg.MAX_HIST_LINES <- 2^14
   else if (.ddg.is.simple(value)) .ddg.save.simple(name, value, scope=scope, from.env=from.env)
   else if (.ddg.is.csv(value)) .ddg.write.csv(name, value, scope=scope, from.env=from.env)
   else if (is.list(value) || is.array(value)) .ddg.snapshot.node(name, "txt", value, save.object=TRUE, dscope=scope, from.env=from.env)
+  else if (.ddg.is.open.connection(value)) .ddg.save.simple(name, .ddg.get.connection.description(value), scope=scope, from.env=from.env)
   else if (.ddg.is.object(value)) .ddg.snapshot.node(name, "txt", value, dscope=scope, from.env=from.env)
   else if (.ddg.is.function(value)) .ddg.save.simple(name, "#ddg.function", scope=scope, from.env=from.env)
   else if (error) stop("Unable to create data (snapshot) node. Non-Object value to", fname, ".")
@@ -1584,7 +1666,7 @@ ddg.MAX_HIST_LINES <- 2^14
 # snum - number of sourced script (main script = 0)
 # pos - starting and ending lines and columns in source code (if available)
 
-.ddg.record.proc <- function(ptype, pname, pvalue, auto.created=FALSE, ptime, snum=NA, pos=NA) {
+.ddg.record.proc <- function(ptype, pname, pvalue, auto.created=FALSE, random.seed="", ptime, snum=NA, pos=NA) {
   # Increment procedure node counter.
   .ddg.inc("ddg.pnum")
   ddg.pnum <- .ddg.pnum()
@@ -1599,6 +1681,7 @@ ddg.MAX_HIST_LINES <- 2^14
         ddg.value = character(size),
         ddg.return.linked = logical(size),
         ddg.auto.created = logical(size),
+        ddg.random.seed = character(size),
         ddg.time = numeric(size),
         ddg.snum = numeric(size),
         ddg.startLine = numeric(size),
@@ -1615,6 +1698,7 @@ ddg.MAX_HIST_LINES <- 2^14
   ddg.proc.nodes$ddg.name[ddg.pnum] <- pname
   ddg.proc.nodes$ddg.value[ddg.pnum] <- pvalue
   ddg.proc.nodes$ddg.auto.created[ddg.pnum] <- auto.created
+  ddg.proc.nodes$ddg.random.seed[ddg.pnum] <- random.seed
   ddg.proc.nodes$ddg.time[ddg.pnum] <- ptime
 
   ddg.proc.nodes$ddg.snum[ddg.pnum] <- snum
@@ -2494,7 +2578,6 @@ ddg.MAX_HIST_LINES <- 2^14
 
 }
 
-
 # Given a parse tree, this function returns a list containing
 # the expressions that correspond to the filename argument
 # of the calls to functions that read or write the files.  If there are
@@ -2507,7 +2590,7 @@ ddg.MAX_HIST_LINES <- 2^14
 
   # Recursive helper function.
   find.files.rec <- function(obj) {
-    #print (obj)
+    # print (obj)
     # Base cases.
     if (!is.recursive(obj)) {
       return(NULL)
@@ -2530,7 +2613,7 @@ ddg.MAX_HIST_LINES <- 2^14
 
       # Call with arguments
       else if (is.symbol (obj[[1]])) {
-        # Is this is file reading function?
+        # Is this a file reading function?
         read.func.pos <- match (as.character(obj[[1]]), func.df$function.names)
         if (!is.na (read.func.pos)) {
           # Find the file argument.
@@ -2561,15 +2644,20 @@ ddg.MAX_HIST_LINES <- 2^14
           funcs <- find.files.rec (obj[2:length(obj)])
 
           # Add this file name to the list of files being read.
-          # Make sure the file name could be evaluated and that it results in
-          # a name, not a connection.
-          if (!is.null(file.name) && is.character(file.name)) {
-            unique (c (file.name, funcs))
+          if (!is.null(file.name)) {
+
+            # If it is an open connection, subsitute the connection description.
+            if (.ddg.is.open.connection(file.name)) {
+              file.name <- .ddg.get.connection.description(file.name)
+            }
+
+            if (is.character(file.name)) {
+              unique (c (file.name, funcs))
+            }
           }
-        }
 
         # Not a file reading function.  Recurse over the arguments.
-        else {
+        } else {
           find.files.rec (obj[2:length(obj)])
         }
       }
@@ -2598,15 +2686,15 @@ ddg.MAX_HIST_LINES <- 2^14
 .ddg.create.file.read.functions.df <- function () {
   # Functions that read files
   function.names <-
-    c ("source", "read.csv", "read.csv2", "read.delim", "read.delim2", "read.table", "read.xls", "file", "readLines")
+    c ("source", "read.csv", "read.csv2", "read.delim", "read.delim2", "read.table", "read.xls", "readLines")
 
   # The argument that represents the file name
   param.names <-
-    c ("file", "file", "file", "file", "file", "file", "xls", "description", "con")
+    c ("file", "file", "file", "file", "file", "file", "xls", "con")
 
   # Position of the file parameter if it is passed by position
   param.pos <-
-    c (1, 1, 1, 1, 1, 1, 1, 1, 1)
+    c (1, 1, 1, 1, 1, 1, 1, 1)
 
   return (data.frame (function.names, param.names, param.pos, stringsAsFactors=FALSE))
 }
@@ -2630,11 +2718,10 @@ ddg.MAX_HIST_LINES <- 2^14
   # This may include files that are not actually read if the
   # read are within an if-statement, for example.
   files.read <- .ddg.find.files.read(cmd, env)
-  #print (".ddg.create.file.read.nodes.and.edges: Files read:")
-  #print (files.read)
+  # print (".ddg.create.file.read.nodes.and.edges: Files read:")
+  # print (files.read)
 
   for (file in files.read) {
-
     # Only create the node and edge if there actually is a file
     # Even if the file exists, it is possible that it was not read here
     if (file.exists(file))
@@ -2656,15 +2743,15 @@ ddg.MAX_HIST_LINES <- 2^14
 .ddg.create.file.write.functions.df <- function () {
   # Functions that read files
   function.names <-
-    c ("write.csv", "write.csv2", "write.table", "ggsave")
+    c ("write.csv", "write.csv2", "write.table", "ggsave", "writeLines")
 
   # The argument that represents the file name
   param.names <-
-    c ("file", "file", "file", "filename")
+    c ("file", "file", "file", "filename", "con")
 
   # Position of the file parameter if it is passed by position
   param.pos <-
-    c (2, 2, 2, 1)
+    c (2, 2, 2, 1, 2)
 
   return (data.frame (function.names, param.names, param.pos, stringsAsFactors=FALSE))
 }
@@ -2687,8 +2774,8 @@ ddg.MAX_HIST_LINES <- 2^14
   # This may include files that are not actually written if the
   # write calls are within an if-statement, for example.
   files.written <- .ddg.find.files.written(cmd, env)
-  #print ("Files written:")
-  #print (files.written)
+  # print (".ddg.create.file.write.nodes.and.edges: Files written:")
+  # print (files.written)
 
   for (file in files.written) {
     # Check that the file exists.  If it does, we will assume that
@@ -3585,7 +3672,7 @@ ddg.MAX_HIST_LINES <- 2^14
 
           if (.ddg.debug.lib()) print(paste(".ddg.parse.commands: Adding operation node for", cmd@abbrev))
 
-          .ddg.proc.node("Operation", cmd@abbrev, cmd@abbrev, env=environ, console=TRUE, cmd=cmd)
+          .ddg.proc.node("Operation", cmd@abbrev, cmd@abbrev, env=environ, console=TRUE, cmd=cmd, random.seed=cmd@random.seed)
           .ddg.proc2proc()
           
           # If a warning occurred when cmd was evaluated,
@@ -3610,7 +3697,7 @@ ddg.MAX_HIST_LINES <- 2^14
 
           if (cmd@readsFile) .ddg.create.file.read.nodes.and.edges(cmd, environ)
           .ddg.link.function.returns(cmd)
-          
+
           if (.ddg.debug.lib()) print(paste(".ddg.parse.commands: Adding input data nodes for", cmd@abbrev))
 
           .ddg.create.data.set.edges.for.cmd(vars.set, cmd, i, d.environ)
@@ -3747,7 +3834,7 @@ ddg.MAX_HIST_LINES <- 2^14
 # CHECK!  Looks like env parameter is not needed!
 .ddg.proc.node <- function(ptype, pname, pvalue="", console=FALSE,
     auto.created=FALSE, env = sys.frame(.ddg.get.frame.number(sys.calls())),
-    cmd = NULL) {
+    cmd = NULL, random.seed="") {
   if (.ddg.debug.lib()) {
     if (length(pname) > 1) {
       print(sys.calls())
@@ -3807,7 +3894,7 @@ ddg.MAX_HIST_LINES <- 2^14
   ptime <- .ddg.elapsed.time()
 
   # Record in procedure node table
-  .ddg.record.proc(ptype, pname, pvalue, auto.created, ptime, snum, pos)
+  .ddg.record.proc(ptype, pname, pvalue, auto.created, random.seed, ptime, snum, pos)
 
   #if (ptype == "Finish") print(sys.calls())
   if (.ddg.debug.lib()) print(paste("proc.node:", ptype, pname))
@@ -3981,6 +4068,30 @@ ddg.MAX_HIST_LINES <- 2^14
   }
 }
 
+# .ddg.read.from.url returns TRUE if the step creating a snapshot
+# has an inflow edge from a url data node.
+
+.ddg.read.from.url <- function() {
+  dnum <- .ddg.dnum()
+  pnum <- .ddg.pnum()
+  enum <- .ddg.enum()
+
+  if (dnum > 0 & pnum > 0 & enum > 0) {
+    dnodes <- .ddg.data.nodes()
+    edges <- .ddg.edges()
+    pnode <- paste("p", pnum, sep="")
+
+    for (i in dnum:1) {
+     if (dnodes[i, "ddg.type"] == "URL") {
+       dnode <- paste("d", i, sep="")
+       index <- which(edges$ddg.type == "df.in" & edges$ddg.from == dnode & edges$ddg.to == pnode)
+       if (length(index) > 0) return(TRUE)
+     }
+    }
+  }
+  return(FALSE)
+}
+
 # .ddg.snapshot.node creates a data node of type Snapshot. Snapshots
 # are used for complex data values not written to file by the main
 # script. The contents of data are written to the file dname.fext
@@ -4007,6 +4118,9 @@ ddg.MAX_HIST_LINES <- 2^14
 
   # Determine if we should save the entire data
   max.snapshot.size <- ddg.max.snapshot.size()
+
+  # Save the entire data if read from a url
+  if (.ddg.read.from.url()) max.snapshot.size = -1
 
   if (max.snapshot.size == 0) {
     return(.ddg.data.node ("Data", dname, "", dscope, from.env=from.env))
@@ -4060,6 +4174,7 @@ ddg.MAX_HIST_LINES <- 2^14
   }
   else if (is.vector(data) || is.data.frame(data) || is.matrix(data) || is.array(data) || is.list(data)) {
   }
+
   else if (!is.character(data)) {
     tryCatch(data <- as.character(data),
           error = function(e){

@@ -81,6 +81,7 @@ setClass("DDGStatement",
         createsGraphics = "logical",  # True if this is a function that creates a graphics
                                       # object, like a call to pdf, for example
         has.dev.off = "logical",  # True if this statement contains a call to dev.off
+        random.seed = "character",  # Random number seed (if any) set in this statement.
         pos = "DDGStatementPos",  # The location of this statement in the source code.
                                   # Has the value null.pos() if it is not available.
         script.num = "numeric",   # The number for the script this statement comes from.
@@ -134,6 +135,7 @@ setMethod ("initialize",
       .Object@writesFile <- .ddg.writes.file (.Object@parsed[[1]])
       .Object@createsGraphics <- .ddg.creates.graphics (.Object@parsed[[1]])
       .Object@has.dev.off <- .ddg.has.call.to (.Object@parsed[[1]], "dev.off")
+      .Object@random.seed <- .ddg.get.random.number.seed(.Object@parsed[[1]])
 
       .Object@pos <-
           if (is.object(pos)) {
@@ -361,6 +363,26 @@ null.pos <- function() {
   return (FALSE)
 }
 
+# .ddg.get.random.number.seed returns the random number seed
+# set in an expression. If a seed is not set, an empty string
+# is returned.
+
+.ddg.get.random.number.seed <- function(expr) {
+  # Does not contain a call to set.seed.
+  if (!.ddg.has.call.to(expr, "set.seed")) return("")
+
+  # Base case.
+  if (!is.recursive(expr)) return("")
+
+  # Is a call to set.seed.
+  if (.ddg.is.call.to(expr, "set.seed")) {
+    return(as.character(expr[[2]]))
+  }
+  # Not a call to set.seed. Recurse on the parts of the expression.
+  else {
+    return(unique(unlist(lapply(expr[1:length(expr)], .ddg.get.random.number.seed))))
+  }
+}
 
 # .ddg.get.var returns the variable being referenced in an
 # expression. It should be passed an expression object that is
