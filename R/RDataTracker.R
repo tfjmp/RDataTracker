@@ -122,10 +122,6 @@ ddg.MAX_HIST_LINES <- 2^14
   return (.ddg.get("ddg.enum"))
 }
 
-.ddg.xnum <- function() {
-  return (.ddg.get("ddg.xnum"))
-}
-
 .ddg.data.nodes <- function() {
   return (.ddg.get("ddg.data.nodes"))
 }
@@ -400,8 +396,7 @@ ddg.MAX_HIST_LINES <- 2^14
   .ddg.set("ddg.pnum", 0)
   .ddg.set("ddg.dnum", 0)
   .ddg.set("ddg.enum", 0)
-  .ddg.set("ddg.xnum", 0)
-
+ 
   # Create DDG string. This string is written to file when ddg.save
   # is called.
   .ddg.set("ddg.txt", "")
@@ -938,7 +933,9 @@ ddg.MAX_HIST_LINES <- 2^14
       pnum <- as.numeric(substr(pnode, 2, nchar(pnode)))
       lnum <- .ddg.get.start.line(pnum)
       dvalue <- .ddg.format.data.value(dnodes[i, "ddg.value"])
-      st <- paste("Line ", lnum , ":  ", dvalue, sep="")
+      st <- paste("Line ", lnum , sep="")
+      writeLines(st, fileout)
+      st <- paste("Message = ", dvalue, sep="")
       writeLines(st, fileout)
       writeLines("", fileout)
     }
@@ -951,19 +948,19 @@ ddg.MAX_HIST_LINES <- 2^14
   }
 }
 
-# .ddg.write.random.number.seeds writes statements that set a random
-# number seed.
+# .ddg.write.random.number.seeds writes random number seeds.
 
 .ddg.write.random.number.seeds <- function(fileout) {
   pnodes <- .ddg.proc.nodes()
   prows <- .ddg.pnum()
   count <- 0
-  for (pnum in 1:prows) {
+
+  for (i in 1:prows) {
     # check if random number seed is set
-    random.seed <- pnodes[pnum, "ddg.random.seed"]
+    random.seed <- pnodes[i, "ddg.random.seed"]
     if (random.seed != "") {
       count <- count + 1
-      lnum <- .ddg.get.start.line(pnum)
+      lnum <- .ddg.get.start.line(i)
       st <- paste("Line ", lnum, sep="")
       writeLines(st, fileout)
       st <- paste("Random number seed = ", random.seed, sep="")
@@ -986,6 +983,7 @@ ddg.MAX_HIST_LINES <- 2^14
   edges <- .ddg.edges()
   pnode <- paste("p", pnum, sep="")
   index <- which(edges$ddg.type == "df.out" & edges$ddg.from == pnode)
+
   if (length(index) > 0) {
     dnode <- edges[index, "ddg.to"]
     dnum <- as.numeric(substr(dnode, 2, nchar(dnode)))
@@ -1001,7 +999,7 @@ ddg.MAX_HIST_LINES <- 2^14
   }
 }
 
-# .ddg.write.url.statement writes statements that read urls.
+# .ddg.write.url.statement writes information on statements that read urls.
 
 .ddg.write.url.statement <- function(dnum, pnum, fileout) {
   dnodes <- .ddg.data.nodes()
@@ -1025,10 +1023,10 @@ ddg.MAX_HIST_LINES <- 2^14
   drows <- .ddg.dnum()
   count <- 0
 
-  for (dnum in 1:drows) {
+  for (i in 1:drows) {
     # check for input urls
-    if (dnodes[dnum, "ddg.type"] == "URL") {
-      dnode <- paste("d", dnum, sep="")
+    if (dnodes[i, "ddg.type"] == "URL") {
+      dnode <- paste("d", i, sep="")
       index <- which(edges$ddg.type == "df.in" & edges$ddg.from == dnode)
       if (length(index) > 0) {
         for (j in 1:length(index)) {
@@ -1036,7 +1034,7 @@ ddg.MAX_HIST_LINES <- 2^14
           pname <- pnodes[index[j], "ddg.name"]
           pnode <- edges[index[j], "ddg.to"]
           pnum <- as.numeric(substr(pnode, 2, nchar(pnode)))
-          .ddg.write.url.statement(dnum, pnum, fileout)
+          .ddg.write.url.statement(i, pnum, fileout)
         }
      }
    }
@@ -1048,8 +1046,8 @@ ddg.MAX_HIST_LINES <- 2^14
   }
 }
 
-# .ddg.write.file.statement writes statements that input or
-# output files.
+# .ddg.write.file.statement writes information on statements
+# that input or output files.
 
 .ddg.write.file.statement <- function(dnum, pnum, fileout) {
   dnodes <- .ddg.data.nodes()
@@ -1079,10 +1077,10 @@ ddg.MAX_HIST_LINES <- 2^14
   drows <- .ddg.dnum()
   count <- 0
 
-  for (dnum in 1:drows) {
+  for (i in 1:drows) {
     # check for input files
-    if (dnodes[dnum, "ddg.type"] == "File") {
-      dnode <- paste("d", dnum, sep="")
+    if (dnodes[i, "ddg.type"] == "File") {
+      dnode <- paste("d", i, sep="")
       index <- which(edges$ddg.type == "df.in" & edges$ddg.from == dnode)
       if (length(index) > 0) {
         for (j in 1:length(index)) {
@@ -1090,7 +1088,7 @@ ddg.MAX_HIST_LINES <- 2^14
           pname <- pnodes[index[j], "ddg.name"]
           pnode <- edges[index[j], "ddg.to"]
           pnum <- as.numeric(substr(pnode, 2, nchar(pnode)))
-          .ddg.write.file.statement(dnum, pnum, fileout)
+          .ddg.write.file.statement(i, pnum, fileout)
         }
       }
    }
@@ -1111,16 +1109,16 @@ ddg.MAX_HIST_LINES <- 2^14
   drows <- .ddg.dnum()
   count <- 0
 
-  for (dnum in 1:drows) {
+  for (i in 1:drows) {
     # check for output files
-    if (dnodes[dnum, "ddg.type"] == "File") {
-      dnode <- paste("d", dnum, sep="")
+    if (dnodes[i, "ddg.type"] == "File") {
+      dnode <- paste("d", i, sep="")
       index <- which(edges$ddg.type == "df.out" & edges$ddg.to == dnode)
       if (length(index) > 0) {
         count <- count + 1
         pnode <- edges[index, "ddg.from"]
         pnum <- as.numeric(substr(pnode, 2, nchar(pnode)))
-        .ddg.write.file.statement(dnum, pnum, fileout)
+        .ddg.write.file.statement(i, pnum, fileout)
      }
    }
   }
@@ -1134,10 +1132,8 @@ ddg.MAX_HIST_LINES <- 2^14
 # .ddg.summary.txt.write writes a summary of the ddg to the file
 # ddg-summary.txt on the ddg directory. It uses the procedure node,
 # data node, and edges tables to extract information about the ddg. 
-# It also uses a list of function names to identify functions that 
-# set random number seeds.
 
-# NOTE: replace calls to md5sum when hash table code is available
+# NOTE: replace calls to md5sum when hash table code is merged.
 
 .ddg.summary.txt.write <- function() {
   # set output file
@@ -1594,7 +1590,7 @@ ddg.MAX_HIST_LINES <- 2^14
   })
 }
 
-#.ddg.is.open.connection returns TRUE if a value is an open connection.
+#.ddg.is.open.connection returns TRUE if value is an open connection.
 
 .ddg.is.open.connection <- function(value) {
   if ("connection" %in% class(value)) {
