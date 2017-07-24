@@ -35,6 +35,9 @@ ddg.MAX_CHECKPOINTS <- 10
 
 ddg.MAX_HIST_LINES <- 2^14
 
+library(tools)
+library(jsonlite)
+
 #-------- FUNCTIONS TO MANAGE THE GLOBAL VARIABLES--------#
 
 # Global variables cannot be used directly in a library.  Instead,
@@ -203,6 +206,18 @@ ddg.MAX_HIST_LINES <- 2^14
 .ddg.loops <- function() {
   return(.ddg.get("ddg.loops"))
 }
+
+# value should be TRUE or FALSE
+# Keeps track of whether the last loop has all iterations
+# recorded or not.
+.ddg.set.details.omitted <- function (value) {
+  .ddg.set ("details.omitted", value)
+}
+
+.ddg.were.details.omitted <- function () {
+  .ddg.get ("details.omitted")
+}
+
 
 # Functions that allow us to save warnings when they occur
 # so that we can create the warning node after the node
@@ -425,12 +440,14 @@ ddg.MAX_HIST_LINES <- 2^14
 
   # Record value returned by calls to ddg.return.
   # ddg.call - the string representing the call, like "f(a)".
+  # line - the line where the function is called that is now returning
   # return.used - remembers if this function return value has been
   #   linked to the caller.
   # return.node.id - the id of the data node that holds the return
   #   value.
   .ddg.set(".ddg.return.values",
           data.frame(ddg.call=character(size),
+          line = integer(size),
           return.used = logical(size),
           return.node.id = integer(size),
           stringsAsFactors=FALSE))
@@ -508,6 +525,13 @@ ddg.MAX_HIST_LINES <- 2^14
   if (!.ddg.is.set("ddg.max.snapshot.size")) {
     .ddg.set("ddg.max.snapshot.size", 100)
   }
+
+  # List of files read and written
+  .ddg.set("ddg.infilenodes", list())
+  .ddg.set("ddg.outfilenodes", list())
+
+  # Data frame containing file reads and writes
+  .ddg.set("ddg.hashtable", data.frame())
 }
 
 # .ddg.set.history provides a wrapper to change the number of
@@ -781,9 +805,9 @@ ddg.MAX_HIST_LINES <- 2^14
 
 # .ddg.json.data.node adds a data node to the ddg.json string.
 
-.ddg.json.data.node <- function(id, dname, dvalue, val.type, dtype, dscope, from.env, dtime, dloc) {
+.ddg.json.data.node <- function(id, dname, dvalue, val.type, dtype, dscope, from.env, dhash, dtime, dloc) {
 
-  jstr <- paste("\n\"d", id, "\" : {\n\"rdt:name\" : \"", dname, "\",\n\"rdt:value\" : \"", dvalue, "\",\n\"rdt:valType\" : ", val.type, ",\n\"rdt:type\" : \"", dtype, "\",\n\"rdt:scope\" : \"", dscope, "\",\n\"rdt:fromEnv\" : \"", from.env, "\",\n\"rdt:timestamp\" : \"", dtime, "\",\n\"rdt:location\" : \"", dloc, "\"\n}", sep="")
+  jstr <- paste("\n\"d", id, "\" : {\n\"rdt:name\" : \"", dname, "\",\n\"rdt:value\" : \"", dvalue, "\",\n\"rdt:valType\" : ", val.type, ",\n\"rdt:type\" : \"", dtype, "\",\n\"rdt:scope\" : \"", dscope, "\",\n\"rdt:fromEnv\" : \"", from.env, "\", \n\"rdt:MD5hash\" : \"", dhash, "\",\n\"rdt:timestamp\" : \"", dtime, "\",\n\"rdt:location\" : \"", dloc, "\"\n}", sep="")
 
   .ddg.append.entity(jstr)
 }
@@ -848,7 +872,6 @@ ddg.MAX_HIST_LINES <- 2^14
   write(ddg.json, fileout)
 }
 
-
 # .ddg.output.procedure.node outputs a procedure node.
 
 .ddg.output.procedure.node <- function(ptype, pname, pvalue, auto.created, ptime, snum, pos) {
@@ -887,7 +910,7 @@ ddg.MAX_HIST_LINES <- 2^14
 
 # .ddg.output.data.node outputs a data node.
 
-.ddg.output.data.node <- function(dtype, dname, dvalue, val.type, dscope, from.env, dtime, dloc) {
+.ddg.output.data.node <- function(dscriptpath, dtype, dname, dvalue, val.type, dscope, from.env, dhash, drw, dtime, dloc) {
   # Get counter
   ddg.dnum <- .ddg.get("ddg.dnum")
 
@@ -897,6 +920,9 @@ ddg.MAX_HIST_LINES <- 2^14
   if (dvalue != "") value.str <- paste(" Value=\"", dvalue, "\"", sep="")
   else value.str <- ""
 
+  if(dscriptpath != "" ) dscriptpath.str <- paste(" Script Path=\"", dscriptpath, "\"", sep="")
+  else dscriptpath.str <- ""
+  
   if(val.type != "" ) val.type.str <- paste(" ValType=\"", .ddg.replace.quotes(val.type), "\"", sep="")
   else val.type.str <- ""
 
@@ -905,9 +931,15 @@ ddg.MAX_HIST_LINES <- 2^14
 
   if (dloc != "") loc.str <- paste(" Location=\"", dloc, "\"", sep="")
   else loc.str <- ""
+  
+  if (dhash != "") dhash.str <- paste(" MD5 Hash=\"", dhash, "\"", sep="")
+  else dhash.str <- ""
 
-  dtxt <- paste(dtype, " d", ddg.dnum, " \"", ddg.dnum, "-", dname, "\"", value.str, val.type.str, time.str, loc.str, ";\n", sep="")
+  if (drw != "") drw.str <- paste(" RW=\"", drw, "\"", sep="")
+  else drw.str <- ""
 
+  dtxt <- paste(dtype, " d", ddg.dnum, " \"", ddg.dnum, "-", dname, "\"", value.str, val.type.str, time.str, loc.str, dhash.str, ";\n", sep="")
+  
   # Record in ddg.txt
   .ddg.append(dtxt)
 
@@ -915,7 +947,7 @@ ddg.MAX_HIST_LINES <- 2^14
   .ddg.append.inc(dtxt)
 
   # Record in ddg.json
-  .ddg.json.data.node(ddg.dnum, dname, dvalue, val.type, dtype, dscope, from.env, dtime="", dloc="")
+  .ddg.json.data.node(ddg.dnum, dname, dvalue, val.type, dtype, dscope, from.env, dhash, dtime, dloc)
 }
 
 
@@ -1297,14 +1329,21 @@ ddg.MAX_HIST_LINES <- 2^14
 # value - the value of the data
 # dscope - data node scope.
 # from.env - if object is from initial environment.
+# dhash - the MD5 hash of original file.
+# drw - whether the file was read or written.
 # dtime (optional) - timestamp of original file.
 # dloc (optional) -  path and name of original file.
 
-.ddg.record.data <- function(dtype, dname, dvalue, value, dscope, from.env=FALSE, dtime="", dloc="") {
+.ddg.record.data <- function(dtype, dname, dvalue, value, dscope, from.env=FALSE, dtime="", dloc="", dhash="", drw="", dscriptpath="") {
   #print("In .ddg.record.data")
   # Increment data node counter.
   .ddg.inc("ddg.dnum")
   ddg.dnum <- .ddg.dnum()
+
+  #Initialize dscriptpath
+  if (!is.null(.ddg.get("ddg.r.script.path"))) {
+    dscriptpath <- .ddg.get("ddg.r.script.path")
+  }
 
   # If the table is full, make it bigger.
   ddg.data.nodes <- .ddg.data.nodes()
@@ -1313,11 +1352,14 @@ ddg.MAX_HIST_LINES <- 2^14
     new.rows <- data.frame(ddg.type = character(size),
         ddg.num = numeric(size),
         ddg.name = character(size),
+        ddg.path = characters(size),
         ddg.value = character(size),
         ddg.val.type = character(size),
         ddg.scope = character(size),
         ddg.from.env = logical(size),
         ddg.time = character(size),
+        ddg.hash = character(size),
+        ddg.rw = character(size),
         ddg.loc = character(size),
         ddg.current = logical(size), stringsAsFactors=FALSE)
     .ddg.add.rows("ddg.data.nodes", new.rows)
@@ -1330,53 +1372,140 @@ ddg.MAX_HIST_LINES <- 2^14
 
   # get value type
   val.type <- .ddg.get.val.type.string(value)
-  
+
   #print(".ddg.record.data: adding info")
   ddg.data.nodes$ddg.type[ddg.dnum] <- dtype
   ddg.data.nodes$ddg.num[ddg.dnum] <- ddg.dnum
+  ddg.data.nodes$ddg.path[ddg.dnum] <- dscriptpath
   ddg.data.nodes$ddg.name[ddg.dnum] <- dname
   ddg.data.nodes$ddg.value[ddg.dnum] <- dvalue2
   ddg.data.nodes$ddg.val.type[ddg.dnum] <- val.type
   ddg.data.nodes$ddg.scope[ddg.dnum] <- dscope
   ddg.data.nodes$ddg.from.env[ddg.dnum] <- from.env
+  ddg.data.nodes$ddg.hash[ddg.dnum] <- dhash
+  ddg.data.nodes$ddg.rw[ddg.dnum] <- drw
   ddg.data.nodes$ddg.time[ddg.dnum] <- dtime
   ddg.data.nodes$ddg.loc[ddg.dnum] <- dloc
+
+  #print(".ddg.record.data: adding file MD5 hash info")
+  if (dtype == "File") {
+    infiles <- .ddg.get("ddg.infilenodes")
+    dhash <- md5sum(dname)
+    ddg.data.nodes$ddg.hash[ddg.dnum] <- dhash
+    if (length(infiles) != 0 && dname == infiles[length(infiles)]) {
+      drw <- "read"
+      ddg.data.nodes$ddg.rw[ddg.dnum] <- drw
+      .ddg.set("ddg.infilenodes", list())
+    } else {
+      drw <- "write"
+      ddg.data.nodes$ddg.rw[ddg.dnum] <- drw
+      .ddg.set("ddg.outfilenodes", list())
+    }
+    longpath <- paste0(getwd(), substring(.ddg.path(),2))
+    .ddg.set("ddg.hashtable", rbind(.ddg.get("ddg.hashtable"), c(dscriptpath, dloc, longpath, paste(.ddg.path(), dvalue, sep="/"), ddg.dnum, dhash, drw, dtime, dvalue2), stringsAsFactors = FALSE))
+  }
+
   ddg.data.nodes$ddg.current[ddg.dnum] <- TRUE
   .ddg.set("ddg.data.nodes", ddg.data.nodes)
 
   # Output data node.
   #print(".ddg.record.data outputting data node")
-  .ddg.output.data.node(dtype, dname, dvalue2, val.type, dscope, from.env, dtime, dloc)
+  .ddg.output.data.node(dscriptpath, dtype, dname, dvalue2, val.type, dscope, from.env, dhash, drw, dtime, dloc)
 
   if (.ddg.debug.lib()) {
-    print(paste("Adding data node", ddg.dnum, "named", dname, "with scope", dscope, " and value ", ddg.data.nodes$ddg.value[ddg.dnum]))
+    if (dtype != "File") {
+      print(paste("Adding data node", ddg.dnum, "named", dname, "with scope", dscope, " and value ", ddg.data.nodes$ddg.value[ddg.dnum]))
+    } else {
+      print(paste("Adding data node", ddg.dnum, "named", dname, "with scope", dscope, " and value ", ddg.data.nodes$ddg.value[ddg.dnum], " that hashes to ", dhash, " and performs a file ", drw))
+    }
   }
 }
 
+# .ddg.hashtable.write writes relevant information about the ddg
+# to the .ddg directory in the user's home directory. If the
+# function is unable to access or create this directory, then 
+# it will write to the working directory.
+
+.ddg.hashtable.write <- function() {
+  # if (interactive()) print(paste("Saving DDG in ", fileout))
+  writedir <- paste0(path.expand("~"),"/.ddg/")
+  if (!dir.exists(writedir)) {
+    tryCatch({
+      dir.create(writedir)
+    },
+    error = function(c){
+      writedir <- paste0(getwd(),"/.ddg/")
+      if (!dir.exists(writedir)) {
+        dir.create(writedir)
+      }
+    })
+  }
+  writefile <- paste0(writedir,"/hashtable.csv")
+  new_hashtable.csv <- .ddg.get("ddg.hashtable")
+  colnames(new_hashtable.csv) <- c("ScriptPath", "FilePath","DDGPath","NodePath","NodeNumber","MD5Hash","ReadWrite","Timestamp","Value")
+  
+  if (file.exists(writefile)) {
+    old_hashtable.csv <- .ddg.hashtable.cleanup(writefile)
+    new_hashtable.csv <- rbind(old_hashtable.csv,new_hashtable.csv)
+  }
+  write.table(new_hashtable.csv, writefile, append = FALSE, col.names = TRUE, row.names = FALSE, sep = ",")
+  
+  
+  # JSON TABLE WORK GOES HERE
+  
+  writejsonfile <- paste0(writedir,"/hashtable.json")
+  new_hashtable.json <- .ddg.get("ddg.hashtable")
+  colnames(new_hashtable.json) <- c("ScriptPath", "FilePath","DDGPath","NodePath","NodeNumber","MD5Hash","ReadWrite","Timestamp","Value")
+  
+  if (file.exists(writejsonfile)) {
+    old_hashtable.json <- .ddg.hashtable.json.cleanup(writejsonfile)
+    new_hashtable.json <- rbind(old_hashtable.json, new_hashtable.json)
+  }
+ write_json(new_hashtable.json, writejsonfile)
+  
+}
+
+# .ddg.hashtable.cleanup cleans the previous hashtable.csv of entries containing
+# ddg data that has been overwritten. Ddg data is considered to be overwritten if
+# it has an identical ddg path to the new elements being written to the file.
+
+.ddg.hashtable.cleanup <- function(writefile) {
+  # if (interactive()) print(paste("Cleaning ddg of entries with DDGPath ", .ddg.path()))
+  old_hashtable.csv <- read.csv(file = writefile)
+  longpath <- paste0(getwd(), substring(.ddg.path(),2))
+  old_hashtable.csv <- subset(old_hashtable.csv, DDGPath != longpath)
+  return(old_hashtable.csv)
+}
+
+.ddg.hashtable.json.cleanup <- function(writejsonfile) {
+  old_hashtable.json <- read_json(writejsonfile, simplifyVector = TRUE)
+  longpath <- paste0(getwd(), substring(.ddg.path(),2))
+  old_hashtable.json <- subset(old_hashtable.json, DDGPath != longpath)
+  return(old_hashtable.json)
+}
 
 # Returns a string representation of the type information of the given value.
-
 .ddg.get.val.type.string <- function(value)
 {
   val.type <- .ddg.get.val.type(value)
-  
+
   if( is.null(val.type) )
   	return( 'null' )
-  
+
   # list, object, environment, function, language
   if( length(val.type) == 1 )
   	return( paste('"',val.type,'"',sep="") )
-  
+
   # vector, matrix, array, data frame
   # type information recorded in a list of 3 vectors (container,dimension,type)
   container <- val.type[[1]]
   dimension <- val.type[[2]]
   type <- val.type[[3]]
-  
+
   # vector: a 1-dimensional array (uniform typing)
   if( identical(container,"vector") )
     return( paste('{"container":"vector", "dimension":[', dimension, '], "type":["' , type, '"]}', sep = "") )
-  
+
   # matrix: a 2-dimensional array (uniform typing)
   if( identical(container,"matrix") )
   {
@@ -1394,7 +1523,7 @@ ddg.MAX_HIST_LINES <- 2^14
   # data frame: is a type of list
   dimension <- paste( dimension , collapse = "," )
   type <- paste( type , collapse = '","' )
-  
+
   return( paste('{"container":"data_frame", "dimension":[', dimension, '], "type":["' , type, '"]}', sep = "") )
 }
 
@@ -1405,16 +1534,16 @@ ddg.MAX_HIST_LINES <- 2^14
 .ddg.get.val.type.from.var <- function(var)
 {
   val.type <- .ddg.get.val.type( get(var) )
-  
+
   # remove dimension information, if any
   if( length(val.type) > 1 )
   	val.type[2] <- NULL
-  
+
   return( val.type )
 }
 
 
-# Returns the type information of the given value, 
+# Returns the type information of the given value,
 # broken into its parts and returned in a vecctor or a list.
 
 .ddg.get.val.type <- function(value)
@@ -1437,11 +1566,11 @@ ddg.MAX_HIST_LINES <- 2^14
     types <- unname(sapply(value,class))
     return( unname(list("data_frame", dim(value), types)) )
  }
-  
+
   # a list
   if(is.list(value))
     return("list")
-    
+
   # an object
   if(is.object(value))
     return("object")
@@ -1453,7 +1582,7 @@ ddg.MAX_HIST_LINES <- 2^14
     return("function")
   if(is.language(value))
     return("language")
-  
+
   # none of the above - null is a character, not NULL or NA
   return(NULL)
 }
@@ -1709,7 +1838,7 @@ ddg.MAX_HIST_LINES <- 2^14
   node1 <- paste("d", dn, sep="")
   node2 <- paste("p", pn, sep="")
   .ddg.record.edge(etype, node1, node2)
-
+  
   if (.ddg.debug.lib()) {
     print(paste("data2proc: ", dname, " ", pname, sep=""))
     print(paste("DF ", node1, " ", node2, sep=""))
@@ -1732,8 +1861,14 @@ ddg.MAX_HIST_LINES <- 2^14
   # Get data & procedure numbers.
   #print (paste(".ddg.proc2data: Looking for", dname, "in scope", dscope))
   dn <- .ddg.data.number(dname, dscope)
+  
   #print (paste(".ddg.proc2data: Found node", dn))
-  pn <- .ddg.proc.number(pname, return.value)
+  
+  # attach data node to the last procedure node if pname is NULL.
+  if(is.null(pname) || startsWith(pname,".ddg.") || startsWith(pname,"ddg"))
+    pn <- .ddg.last.proc.number()
+  else
+    pn <- .ddg.proc.number(pname, return.value)
 
   # Create data flow edge from procedure node to data node.
   if (dn != 0 && pn != 0) {
@@ -2014,7 +2149,7 @@ ddg.MAX_HIST_LINES <- 2^14
       if (length(nRow) > 0) {
         first.writer <- min(vars.set$first.writer[nRow], vars.set$possible.first.writer[nRow])
         last.writer <- max(vars.set$last.writer[nRow], vars.set$possible.last.writer[nRow])
-
+        
         # Draw the edge if we will connect to a node that exists
         # before the console block or to the last writer of this
         # variable within the console block.
@@ -2273,13 +2408,16 @@ ddg.MAX_HIST_LINES <- 2^14
 # cmd - text command
 # cmd.expr - parsed command
 .ddg.create.file.read.nodes.and.edges <- function (cmd, env) {
-  #print(paste("In .ddg.create.file.read.nodes.and.edges"))
+  #print("In .ddg.create.file.read.nodes.and.edges")
   # Find all the files potentially read in this command.
   # This may include files that are not actually read if the
   # read are within an if-statement, for example.
   files.read <- .ddg.find.files.read(cmd, env)
+  # Adds the files read to ddg.infilenodes for use in determining reads
+  # and writes in the hashtable.
+  .ddg.set("ddg.infilenodes", c(.ddg.get("ddg.infilenodes"), files.read))
   #print (".ddg.create.file.read.nodes.and.edges: Files read:")
-  #print (files.read)
+  # print (files.read)
 
   for (file in files.read) {
 
@@ -2335,7 +2473,10 @@ ddg.MAX_HIST_LINES <- 2^14
   # This may include files that are not actually written if the
   # write calls are within an if-statement, for example.
   files.written <- .ddg.find.files.written(cmd, env)
-  #print ("Files written:")
+  # Adds the files written to ddg.outfilenodes for use in determining reads
+  # and writes in the hashtable.
+  .ddg.set("ddg.outfilenodes", c(.ddg.get("ddg.outfilenodes"), files.written))
+  #print (".ddg.create.file.read.nodes.and.edges: Files written:")
   #print (files.written)
 
   for (file in files.written) {
@@ -2426,14 +2567,17 @@ ddg.MAX_HIST_LINES <- 2^14
     file <- paste0("dev.off.", .ddg.dnum()+1, ".pdf")
   }
   #print(paste(".ddg.capture.graphics: writing to ", file))
-
+  
   # Save the graphic to a file temporarily
   #print(sys.calls())
   dev.print(device=pdf, file=file)
-
+  
   # Add it to the ddg.  This will copy the file to the right directory
-  ddg.file.out (file, pname=cmd@abbrev)
-
+  if(is.null(cmd))
+    ddg.file.out( file )
+  else
+    ddg.file.out (file, pname=cmd@abbrev)
+  
   # Remove the temporary file
   file.remove(file)
 }
@@ -2520,7 +2664,12 @@ ddg.MAX_HIST_LINES <- 2^14
   # Find the functions that have completed but whose returns have
   # not been used yet.
   returns <- .ddg.get(".ddg.return.values")
-  unused.returns <- returns[!returns$return.used & returns$return.node.id > 0, ]
+  if (!is.na(command@pos@startLine)) {
+    unused.returns <- returns[!returns$return.used & returns$return.node.id > 0 & !is.na(returns$line) & returns$line == command@pos@startLine, ]
+  }
+  else {
+    unused.returns <- returns[!returns$return.used & returns$return.node.id > 0, ]
+  }
   if (nrow(unused.returns) == 0) return()
   #print (paste(".ddg.link.function.returns: unused.returns:", unused.returns))
 
@@ -2853,8 +3002,10 @@ ddg.MAX_HIST_LINES <- 2^14
 .ddg.save.annotated.script <- function(cmds, script.name) {
   for (i in 1:length(cmds)) {
     expr <- cmds[[i]]@annotated
-    line <- paste(deparse(expr[[1]]), collapse="\n")
-    if (i == 1) script <- line else script <- append(script, line)
+    for (j in 1:length(expr)) {
+      line <- deparse(expr[[j]])
+      if (i == 1 && j == 1) script <- line else script <- append(script, line)
+    }
   }
 
   fileout <- file(paste(.ddg.path.debug(), "/annotated-", script.name, sep=""))
@@ -3026,9 +3177,10 @@ ddg.MAX_HIST_LINES <- 2^14
       # block, so there is no need to create additional nodes for the
       # control statement itself.
 
-      create <- !cmd@isDdgFunc && .ddg.is.init() && .ddg.enable.console() && !(control.statement && ddg.annotate.inside() && ddg.max.loops() > 0)
+      create <- !cmd@isDdgFunc && .ddg.is.init() && .ddg.enable.console() && !(control.statement && .ddg.annotate.inside() && ddg.max.loops() > 0)
       # create <- !cmd@isDdgFunc && .ddg.is.init() && .ddg.enable.console()
       start.finish.created <- FALSE
+      cur.cmd.closed <- FALSE
 
       # If the command does not match one of the ignored patterns.
       if (!any(sapply(ignore.patterns, function(pattern){grepl(pattern, cmd@text)}))) {
@@ -3052,6 +3204,8 @@ ddg.MAX_HIST_LINES <- 2^14
             .ddg.set(".ddg.possible.last.cmd", cmd)
             .ddg.set (".ddg.cur.cmd", cmd)
 
+            #print(paste("Pushing onto the stack:", cmd@text))
+            
             # Remember the current statement on the stack so that we
             # will be able to create a corresponding Finish node later
             # if needed.
@@ -3069,15 +3223,15 @@ ddg.MAX_HIST_LINES <- 2^14
           else if (.ddg.is.procedure.cmd(cmd)) {
             .ddg.set(".ddg.possible.last.cmd", NULL)
           }
-          
-          # Before evaluating, 
+
+          # Before evaluating,
           # keep track of variable types for common variables between vars.set and vars.used.
           #common.vars <- intersect( cmd@vars.set , cmd@vars.used )
           #num.vars <- length(common.vars)
-          
+
           #if( num.vars > 0 )
           #  used.types <- sapply( common.vars , .ddg.get.val.type.from.var )
-          
+
           # Capture any warnings that occur when an expression is evaluated.
           # Note that we cannot just use a tryCatch here because it behaves
           # slightly differently and we would lose the value that eval
@@ -3087,7 +3241,7 @@ ddg.MAX_HIST_LINES <- 2^14
           # EVALUATE.
 
           if (.ddg.debug.lib()) print (paste (".ddg.parse.commands: Evaluating ", cmd@annotated))
-          
+
           result <- withCallingHandlers(
             eval(cmd@annotated, environ, NULL) ,
             warning = .ddg.set.warning ,
@@ -3132,19 +3286,19 @@ ddg.MAX_HIST_LINES <- 2^14
           )
 
           if (.ddg.debug.lib()) print (paste (".ddg.parse.commands: Done evaluating ", cmd@annotated))
-          
+
           # After evaluating
           # Check changes to variable type for common variables between vars.set and vars.used
           #if( num.vars > 0 )
           #{
           #  set.types <- sapply( common.vars , .ddg.get.val.type.from.var )
-          #  
+          #
           #  # comparing type changes for variables set and variables used
           #  # only 1 common variable between vars.set and vars.used
           #  if( num.vars == 1 )
           #  {
           #    is.same <- identical( set.types , used.types )
-          #    
+          #
           #    # remember var names for vars whose types have changed, NULL otherwise
           #    if(is.same)
           #      changed.vars <- NULL
@@ -3158,22 +3312,22 @@ ddg.MAX_HIST_LINES <- 2^14
           #  {
           #    is.same <- mapply( identical , set.types , used.types )
           #    changed.vars <- names(is.same)[which(is.same==FALSE)]
-          #    
+          #
           #    # convert to string
           #    if( ! is.null(changed.vars) )
           #      changed.vars <- paste( changed.vars , collapse = "," )
           #  }
-          #  
+          #
           #  # show warning message
           #  if( ! is.null(changed.vars) )
-          #  { 
+          #  {
           #    msg <- paste( "For the statement \"" , cmd@text , "\", " , "in line " , cmd@pos@startLine , ",\n" , sep = "" )
           #    msg <- paste( msg , "The type changed for the following variables: " , changed.vars , sep = "" )
-          #    
+          #
           #    warning( msg , call. = FALSE )
           #  }
           #}
-          
+
           if (!cmd@isDdgFunc && cmd@text != "next") {
             # Need to get the stack again because it could have been
             # modified during the eval call.
@@ -3191,14 +3345,16 @@ ddg.MAX_HIST_LINES <- 2^14
 
               # If the number of loop iterations exceeds max.loops, add
               # output data nodes containing final values to the finish node.
-              if (loop.statement && !ddg.loop.annotate()) {
+              if (loop.statement && .ddg.were.details.omitted()) {
                 vars.set2 <- .ddg.add.to.vars.set(vars.set, cmd, i)
                 .ddg.create.data.node.for.possible.writes(vars.set2, cmd, environ)
+                .ddg.set.details.omitted(FALSE)
               }
             }
 
             # Remove the last command & start.created values pushed
             # onto the stack
+            cur.cmd.closed <- (.ddg.cur.cmd.stack[stack.length] == "MATCHES_CALL")
             if (stack.length == 2) {
               .ddg.set(".ddg.cur.cmd.stack", vector())
             }
@@ -3220,9 +3376,9 @@ ddg.MAX_HIST_LINES <- 2^14
         last.proc.node.created <-
             if (.ddg.is.set (".ddg.last.proc.node.created")).ddg.get(".ddg.last.proc.node.created")
             else ""
-        cur.cmd.closed <- (last.proc.node.created == paste ("Finish", cmd@abbrev))
+        
         create.procedure <- create && (!cur.cmd.closed || !named.node.set) && !start.finish.created  && !grepl("^ddg.source", cmd@text)
-
+        
         # We want to create a procedure node for this command.
         if (create.procedure) {
 
@@ -3232,7 +3388,7 @@ ddg.MAX_HIST_LINES <- 2^14
 
           .ddg.proc.node("Operation", cmd@abbrev, cmd@abbrev, env=environ, console=TRUE, cmd=cmd)
           .ddg.proc2proc()
-          
+
           # If a warning occurred when cmd was evaluated,
           # attach a warning node
           if (.ddg.warning.occurred()) {
@@ -3255,7 +3411,7 @@ ddg.MAX_HIST_LINES <- 2^14
 
           if (cmd@readsFile) .ddg.create.file.read.nodes.and.edges(cmd, environ)
           .ddg.link.function.returns(cmd)
-          
+
           if (.ddg.debug.lib()) print(paste(".ddg.parse.commands: Adding input data nodes for", cmd@abbrev))
 
           .ddg.create.data.set.edges.for.cmd(vars.set, cmd, i, d.environ)
@@ -3878,7 +4034,7 @@ ddg.MAX_HIST_LINES <- 2^14
     expr =
         # If pname is not provided, get from function call.
         if (is.null(pname)) {
-          #print(".ddg.lookup.function.name: pname is null")
+          
           #print(".ddg.lookup.function.name: sys.calls() =")
           #print(sys.calls())
 
@@ -3899,17 +4055,17 @@ ddg.MAX_HIST_LINES <- 2^14
           }
           else {
             pname <- as.character(call[[1]])
+            
+            # set pname to null for internal function calls
+#            if(startsWith(pname,".ddg."))
+#              pname <- NULL
           }
         }
 
         # Convert pname to a string if necessary.
         else if (!is.character(pname)) {
-          #print(paste(".ddg.lookup.function.name: pname is string ", pname))
           pname <- deparse(substitute(pname))
         }
-        #else {
-        #  print(paste(".ddg.lookup.function.name: pname is NOT a string ", pname))
-        #}
 )
 
 # .ddg.lookup.value is used to determine what value to use when
@@ -4355,20 +4511,6 @@ ddg.MAX_HIST_LINES <- 2^14
   return(exists(name, scope, inherits=FALSE))
 }
 
-#.ddg.rm removes all data except ddg information
-.ddg.rm <-function()
-
-# .ddg.get.annotation.list checks to see if the script contains calls to
-# ddg.annotate.on or ddg.annotate.off. If it does, these calls are executed.
-
-.ddg.get.annotation.list <- function(parsed.command) {
-  if (length(parsed.command[[1]]) > 1) {
-    if (toString(parsed.command[[1]][[1]]) == "ddg.annotate.on" | toString(parsed.command[[1]][[1]]) == "ddg.annotate.off") {
-      eval(parsed.command)
-    }
-  }
-}
-
 # Creates a start node for the current command if one has not
 # been created already.
 .ddg.create.start.for.cur.cmd <- function (call, caller.env) {
@@ -4421,6 +4563,7 @@ ddg.MAX_HIST_LINES <- 2^14
 .ddg.remove.last.cmd.start.created <- function () {
   .ddg.cur.cmd.stack <- .ddg.get(".ddg.cur.cmd.stack")
   stack.length <- length(.ddg.cur.cmd.stack)
+  #print(paste(".ddg.remove.last.cmd.start.created: Popping from stack:", .ddg.cur.cmd.stack[stack.length-1]))
 
   if (stack.length == 2) {
     .ddg.set(".ddg.cur.cmd.stack", vector())
@@ -4845,7 +4988,7 @@ ddg.return.value <- function (expr=NULL, cmd.func=NULL) {
 
   pname <- NULL
   .ddg.lookup.function.name(pname)
-
+  
   # If this is a recursive call to ddg.return.value, find
   # the caller of the first ddg.return.value
   if (grepl("(^ddg|.ddg)", pname)) {
@@ -4868,6 +5011,7 @@ ddg.return.value <- function (expr=NULL, cmd.func=NULL) {
   if (nrow(ddg.return.values) == ddg.num.returns) {
     size = 100
     new.rows <- data.frame(ddg.call = character(size),
+                           line = integer(size),
                            return.used = logical(size),
                            return.node.id = integer(size),
                            stringsAsFactors=FALSE)
@@ -4922,12 +5066,17 @@ ddg.return.value <- function (expr=NULL, cmd.func=NULL) {
 
   # Create an edge from the return statement to its return value.
   .ddg.proc2data(return.stmt@abbrev, return.node.name, return.node.scope, return.value=TRUE)
+  
 
   # Update the table.
   ddg.num.returns <- ddg.num.returns + 1
   ddg.return.values$ddg.call[ddg.num.returns] <- call.text
   ddg.return.values$return.used[ddg.num.returns] <- FALSE
   ddg.return.values$return.node.id[ddg.num.returns] <- .ddg.dnum()
+  ddg.cur.cmd.stack <- .ddg.get(".ddg.cur.cmd.stack")
+  ddg.return.values$line[ddg.num.returns] <- 
+      if (length(ddg.cur.cmd.stack) == 0) NA
+      else ddg.cur.cmd.stack[length(ddg.cur.cmd.stack) - 1][[1]]@pos@startLine
   .ddg.set(".ddg.return.values", ddg.return.values)
   .ddg.set(".ddg.num.returns", ddg.num.returns)
 
@@ -4989,7 +5138,7 @@ ddg.return.value <- function (expr=NULL, cmd.func=NULL) {
 # ddg.annotate.inside returns the value of the parameter
 # annotate.inside.
 
-ddg.annotate.inside <- function() {
+.ddg.annotate.inside <- function() {
   return(.ddg.get("ddg.annotate.inside"))
 }
 
@@ -5013,7 +5162,7 @@ ddg.max.snapshot.size <- function() {
 }
 
 # ddg.loop.annotate returns the value of the parameter ddg.loop.annotate.
-ddg.loop.annotate <- function() {
+.ddg.loop.annotate <- function() {
   return(.ddg.get("ddg.loop.annotate"))
 }
 
@@ -5025,6 +5174,23 @@ ddg.loop.annotate.on <- function() {
 # ddg.loop.annotate.off turns off loop annotation.
 ddg.loop.annotate.off <- function() {
   .ddg.set("ddg.loop.annotate", FALSE)
+}
+
+.ddg.inside.loop <- function() {
+  return (.ddg.get("ddg.inside.loop"))
+}
+
+ddg.set.inside.loop <- function() {
+  if (!.ddg.is.set("ddg.inside.loop")) {
+    .ddg.set("ddg.inside.loop", 0)    
+  }
+  else {
+    .ddg.set("ddg.inside.loop", .ddg.get("ddg.inside.loop") + 1)    
+  }
+}
+
+ddg.not.inside.loop <- function() {
+  .ddg.set("ddg.inside.loop", .ddg.get("ddg.inside.loop") - 1)    
 }
 
 # ddg.loop.count returns the current count for the specified loop.
@@ -5073,15 +5239,44 @@ ddg.forloop <- function(index.var) {
 # happen if the number of the first loop to be annotaed (first.loop) is
 # greater than 1 and/or if the total number of loops to be annotated is
 # less than the actual number of iterations.
+#
+# It also sets a variable to remember that the last construct is incomplete
+# so that the right data nodes get created.
 
 ddg.details.omitted <- function() {
   pnode.name <- "Details Omitted"
   .ddg.proc.node("Incomplete", pnode.name, pnode.name)
   .ddg.proc2proc()
+  .ddg.set.details.omitted(TRUE)
 
   if (.ddg.debug.lib()) {
     print("Adding Details Omitted node")
   }
+}
+
+# Returns true if we should run the annotated version of a function and
+# false if we should run the unannotated version.
+
+ddg.should.run.annotated <- function (func.name) {
+  #print("In ddg.should.run.annotated")
+  
+  # Check if we are in a loop and loop annotations are off
+  if (!.ddg.loop.annotate() && .ddg.inside.loop() > 0) return (FALSE)
+  
+  # Make sure this specific function has not been disabled
+  if (!is.null(.ddg.annotate.off()) & func.name %in% .ddg.annotate.off()) return(FALSE)
+  
+  #print(paste(func.name, "is not in off list"))
+  
+  # Not annotating functions in general
+  # Check if this specific function should be annotated
+  if (!is.null(.ddg.annotate.on()) & func.name %in% .ddg.annotate.on()) return(TRUE)
+  
+  #print(paste(func.name, "is not in on list"))
+  
+  # If we do not know anything specific about this function, follow the 
+  # general rule
+  return (.ddg.annotate.inside()) 
 }
 
 # ddg.eval evaluates a statement and creates data flow edges from
@@ -5444,7 +5639,7 @@ ddg.url.out <- function(dname, dvalue=NULL, pname=NULL) {
 
 ddg.file.out <- function(filename, dname=NULL, pname=NULL) {
   if (!.ddg.is.init()) return(invisible())
-
+  
   if (is.null(dname)) {
     dname <- basename(filename)
     scope <- NULL
@@ -5452,17 +5647,17 @@ ddg.file.out <- function(filename, dname=NULL, pname=NULL) {
   else {
     scope <- .ddg.get.scope (dname)
   }
-
+  
   # Create output file node called filename and copy file.
   #print(paste("ddg.file.out copying ", filename))
   saved.file <- .ddg.file.copy("File", filename, dname, scope)
   #print(paste("ddg.file.out done copying ", filename))
-
+  
   .ddg.lookup.function.name(pname)
-
+  
   # Create data flow edge from operation node to file node.
   .ddg.proc2data(pname, dname, scope)
-
+  
   return (saved.file)
 }
 
@@ -5564,6 +5759,13 @@ ddg.finish <- function(pname=NULL) {
 #   If not provided, the DDG will be saved in a subdirectory called
 #   "ddg" in the current working directory.
 # enable.console (optional) - if TRUE, console mode is turned on.
+# annotate.inside.functions (optional) - if TRUE, functions are annotated.
+# first.loop (optional) - the first loop to annotate in a for, while, or
+#   repeat statement.
+# max.loops (optional) - the maximum number of loops to annotate in a for,
+#   while, or repeat statement. If max.loops = -1 there is no limit.
+#   If max.loops = 0, no loops are annotated.  If non-zero, if-statements
+#   are also annotated.
 # max.snapshot.size (optional) - the maximum size for objects that
 #   should be output to snapshot files. If 0, no snapshot files are saved.
 #   If -1, all snapshot files are saved. Size in kilobytes.  Note that
@@ -5572,7 +5774,7 @@ ddg.finish <- function(pname=NULL) {
 # Addition : overwrite (optional) - default TRUE, if FALSE, generates
 #   timestamp for ddg directory
 
-ddg.init <- function(r.script.path = NULL, ddgdir = NULL, overwrite = TRUE, enable.console = TRUE, annotate.inside = TRUE, first.loop = 1, max.loops = 1, max.snapshot.size = 10) {
+ddg.init <- function(r.script.path = NULL, ddgdir = NULL, overwrite = TRUE, enable.console = TRUE, annotate.inside.functions = TRUE, first.loop = 1, max.loops = 1, max.snapshot.size = 10) {
   #.ddg.DDGStatement.init()
   .ddg.init.tables()
 
@@ -5624,6 +5826,7 @@ ddg.init <- function(r.script.path = NULL, ddgdir = NULL, overwrite = TRUE, enab
   .ddg.set(".ddg.enable.console", enable.console)
   .ddg.set(".ddg.func.depth", 0)
   .ddg.set(".ddg.explorer.port", 6096)
+  .ddg.set.details.omitted(FALSE)
   # .ddg.init.environ()
 
   # Initialize the information about the open start-finish blocks
@@ -5658,7 +5861,7 @@ ddg.init <- function(r.script.path = NULL, ddgdir = NULL, overwrite = TRUE, enab
   # and max.snapshot.size.
   if (is.null(ddg.get.detail())) {
     # Store value of annotate.inside.
-    .ddg.set("ddg.annotate.inside", annotate.inside)
+    .ddg.set("ddg.annotate.inside", annotate.inside.functions)
 
     # Store maximum number of loops to annotate.
     if (max.loops < 0) max.loops <- 10^10
@@ -5667,9 +5870,13 @@ ddg.init <- function(r.script.path = NULL, ddgdir = NULL, overwrite = TRUE, enab
     # Store maximum snapshot size.
     .ddg.set("ddg.max.snapshot.size", max.snapshot.size)
   }
-
+  
   # If loops are not annotated, do not annotate functions called from inside a loop.
   if (max.loops == 0) ddg.loop.annotate.off()
+  
+  # Initialize the counter that keeps track of nested levels
+  # of ifs and loops
+  ddg.set.inside.loop()
 
   # Set number of first loop.
   .ddg.set("ddg.first.loop", first.loop)
@@ -5702,13 +5909,13 @@ ddg.init <- function(r.script.path = NULL, ddgdir = NULL, overwrite = TRUE, enab
 #   is executed with calls to ddg.init and ddg.save so that
 #   provenance for the function is captured.
 # enable.console (optional) - if TRUE, console mode is turned on.
-# annotate.inside (optional) - if TRUE, functions and control statements
-#   are annotated.
+# annotate.inside.functions (optional) - if TRUE, functions are annotated.
 # first.loop (optional) - the first loop to annotate in a for, while, or
 #   repeat statement.
 # max.loops (optional) - the maximum number of loops to annotate in a for,
 #   while, or repeat statement. If max.loops = -1 there is no limit.
-#   If max.loops = 0, no loops are annotated.
+#   If max.loops = 0, no loops are annotated.  If non-zero, if-statements
+#   are also annotated.
 # max.snapshot.size (optional) - the maximum size for objects that
 #   should be output to snapshot files. If 0, no snapshot files are
 #   saved. If -1, all snapshot files are saved.  Size in kilobytes.
@@ -5717,11 +5924,12 @@ ddg.init <- function(r.script.path = NULL, ddgdir = NULL, overwrite = TRUE, enab
 # debug (optional) - If TRUE, enable script debugging. This has the
 #   same effect as inserting ddg.breakpoint() at the top of the script.
 # save.debug (optional) - If TRUE, save debug files to debug directory.
+# save.hashtable (optional) - If TRUE, save ddg information to hashtable.csv.
 
-ddg.run <- function(r.script.path = NULL, ddgdir = NULL, overwrite = TRUE, f = NULL, enable.console = TRUE, annotate.inside = TRUE, first.loop = 1, max.loops = 1, max.snapshot.size = 10, debug = FALSE, save.debug = FALSE, display = FALSE) {
+ddg.run <- function(r.script.path = NULL, ddgdir = NULL, overwrite = TRUE, f = NULL, enable.console = TRUE, annotate.inside.functions = TRUE, first.loop = 1, max.loops = 1, max.snapshot.size = 10, debug = FALSE, save.debug = FALSE, display = FALSE, save.hashtable = TRUE) {
 
   # Initiate ddg.
-  ddg.init(r.script.path, ddgdir, overwrite, enable.console, annotate.inside, first.loop, max.loops, max.snapshot.size)
+  ddg.init(r.script.path, ddgdir, overwrite, enable.console, annotate.inside.functions, first.loop, max.loops, max.snapshot.size)
 
   # Create ddg directory.
   # dir.create(.ddg.path(), showWarnings = FALSE)
@@ -5751,7 +5959,7 @@ ddg.run <- function(r.script.path = NULL, ddgdir = NULL, overwrite = TRUE, f = N
                 force.console = FALSE)
           else stop("r.script.path and f cannot both be NULL"),
       finally={
-        ddg.save(r.script.path)
+        ddg.save(r.script.path, save.hashtable = save.hashtable)
         if(display==TRUE){
           ddg.display()
         }
@@ -5770,8 +5978,11 @@ ddg.run <- function(r.script.path = NULL, ddgdir = NULL, overwrite = TRUE, f = N
 # save.debug (optional) - If TRUE, save debug files to debug directory.
 #   Used in console mode.
 # quit (optional) - If TRUE, remove all DDG files from memory.
+# save.hashtable (optional) - If TRUE, save DDG information to hashtable.csv.
+#   Unlike ddg.run, this is set to false as default since it will generally
+#   be called internally and by tests, as opposed to by the user.
 
-ddg.save <- function(r.script.path = NULL, save.debug = FALSE, quit = FALSE) {
+ddg.save <- function(r.script.path = NULL, save.debug = FALSE, quit = FALSE, save.hashtable = FALSE) {
   if (!.ddg.is.init()) return(invisible())
 
   if (interactive() && .ddg.enable.console()) {
@@ -5783,7 +5994,11 @@ ddg.save <- function(r.script.path = NULL, save.debug = FALSE, quit = FALSE) {
    if (length(dev.list()) >= 1) {
      #print("ddg.save: Saving graphics open at end of script")
      # tryCatch (.ddg.capture.current.graphics(basename(r.script.path)),
-     tryCatch (.ddg.capture.current.graphics(basename(.ddg.get("ddg.r.script.path"))),
+     
+     #tryCatch (.ddg.capture.current.graphics(basename(.ddg.get("ddg.r.script.path"))),
+      
+     tryCatch (.ddg.capture.current.graphics(NULL),
+      
          error = function (e) e)
    }
 
@@ -5798,6 +6013,18 @@ ddg.save <- function(r.script.path = NULL, save.debug = FALSE, quit = FALSE) {
   .ddg.json.write()
   if (interactive()) print(paste("Saving ddg.json in ", .ddg.path(), sep=""))
 
+  # Save hashtable.csv to file.
+  if (save.hashtable) {
+    if (interactive()) {
+      if (dir.exists(paste0(path.expand("~"),"/.ddg/"))) {
+        print("Saving hashtable.csv in .ddg directory.")
+      } else {
+        print("No .ddg directory found in home directory, saving hashtable.csv in local directory.")
+      }
+    }
+    .ddg.hashtable.write()
+  }
+  
   # Save sourced scripts (if any). First row is main script.
   ddg.sourced.scripts <- .ddg.get(".ddg.sourced.scripts")
   if (!is.null(ddg.sourced.scripts)) {
@@ -6241,20 +6468,54 @@ ddg.console.on <- function() {
 
 # ddg.annotate.on enables annotation for the specified functions. Functions
 # not on this list are not annotated.
+# 
+# If fnames is NULL, all functions will be annotated
 
 # fnames - a list of one or more function names passed in as strings.
 
-ddg.annotate.on <- function (fnames=NULL) {
-  .ddg.set("ddg.annotate.on", fnames)
+ddg.annotate.on <- function (fnames=NULL){
+  if (is.null(fnames)) {
+    .ddg.set("ddg.annotate.off", vector())
+    .ddg.set("ddg.annotate.inside", TRUE)
+    return()
+  }
+
+  # Add to the on list
+  on.list <- .ddg.get("ddg.annotate.on")
+  on.list <- union (on.list, fnames)
+  .ddg.set("ddg.annotate.on", on.list)
+  
+  # Remove from the off list
+  off.list <- .ddg.get("ddg.annotate.off")
+  off.list <- Filter (function(off) !(off %in% fnames), off.list)
+  .ddg.set("ddg.annotate.off", off.list) 
+
 }
 
 # ddg.annotate.off disables annotation for the specified functions.
 # Functions not on this list are annotated.
-
+# 
+# If fnames is NULL, no functions will be annotated
+#
 # fnames - a list of one or more function names passed in as strings.
 
 ddg.annotate.off <- function (fnames=NULL) {
-  .ddg.set("ddg.annotate.off", fnames)
+  if (is.null(fnames)) {
+    .ddg.set("ddg.annotate.on", vector())
+    .ddg.set("ddg.annotate.inside", FALSE)
+    return()
+  }
+  
+  # Add to the off list
+  off.list <- .ddg.get("ddg.annotate.off")
+  off.list <- union (off.list, fnames)
+  .ddg.set("ddg.annotate.off", off.list)
+  
+  # Remove from the on list
+  on.list <- .ddg.get("ddg.annotate.on")
+  on.list <- Filter (function(on) !(on %in% fnames), on.list)
+  .ddg.set("ddg.annotate.on", on.list) 
+  
 }
 
 # ddg.flush.ddg removes all files from the DDG directories unless the
