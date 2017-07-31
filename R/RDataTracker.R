@@ -3352,21 +3352,43 @@ library(jsonlite)
           result <- withCallingHandlers(
           
               {
-                for (annot in cmd@annotated) {
-                  #print (paste (".ddg.parse.commands: Evaluating ", paste(annot, collapse = " ")))
-                  # Don't set return.value if we are calling a ddg function or we are executing an if-statement
-                  if (grepl("^ddg", annot) || grepl("^.ddg", annot) || as.character(.ddg.get.statement.type(annot)) == "if") {
-                    eval(annot, environ, NULL)
+                #print (paste ("inside.func? ", inside.func))
+                #if (!inside.func) {
+                  for (annot in cmd@annotated) {
+                    #print (paste (".ddg.parse.commands: Evaluating ", paste(annot, collapse = " ")))
+                    # Don't set return.value if we are calling a ddg function or we are executing an if-statement
+                    if (grepl("^ddg", annot) || grepl("^.ddg", annot) || as.character(.ddg.get.statement.type(annot)) == "if") {
+                      eval(annot, environ, NULL)
+                    }
+                    else {
+                      return.value <- eval(annot, environ, NULL)
+                      #if (typeof(return.value) != "closure") {
+                      #  print (paste (".ddg.parse.commands: Done evaluating ", annot))
+                      #  print(paste(".ddg.parse.commands: setting .ddg.last.R.value to", return.value))
+                      #}
+                      .ddg.set (".ddg.last.R.value", return.value)
+                    }
                   }
-                  else {
-                    return.value <- eval(annot, environ, NULL)
-                    #if (typeof(return.value) != "closure") {
-                    #  print (paste (".ddg.parse.commands: Done evaluating ", annot))
-                    #  print(paste(".ddg.parse.commands: setting .ddg.last.R.value to", return.value))
-                    #}
-                    .ddg.set (".ddg.last.R.value", return.value)
-                  }
-                }
+#                }
+#                else {
+#                  # Grasping at straws!
+#                  for (pcmd in cmd@parsed) {
+#                    print (paste (".ddg.parse.commands: Evaluating ", paste(pcmd, collapse = " ")))
+#                    # Don't set return.value if we are calling a ddg function or we are executing an if-statement
+#                    if (grepl("^ddg", pcmd) || grepl("^.ddg", pcmd) || as.character(.ddg.get.statement.type(pcmd)) == "if") {
+#                      eval(pcmd, environ, NULL)
+#                    }
+#                    else {
+#                      return.value <- eval(pcmd, environ, NULL)
+#                      if (typeof(return.value) != "closure") {
+#                        print (paste (".ddg.parse.commands: Done evaluating ", pcmd))
+#                        print(paste(".ddg.parse.commands: setting .ddg.last.R.value to", return.value))
+#                      }
+#                      .ddg.set (".ddg.last.R.value", return.value)
+#                    }
+#                    
+#                  }
+#                }
               },
             warning = .ddg.set.warning ,
             error = function(e)
@@ -5142,11 +5164,13 @@ ddg.return.value <- function (expr=NULL, cmd.func=NULL) {
     #print("ddg.return.value: Found a recursive call")
     caller.frame <- .ddg.find.ddg.return.value.caller.frame.number ()
     pname <- as.character(sys.call(caller.frame)[[1]])
+    recursive.call <- TRUE
     #print(paste("ddg.return.value: updated pname =", pname))
   }
   else {
     #print("ddg.return.value: NOT a recursive call")
     caller.frame <- -1
+    recursive.call <- FALSE
   }
 
   # Prints the call & arguments.
@@ -5178,11 +5202,12 @@ ddg.return.value <- function (expr=NULL, cmd.func=NULL) {
     full.call <- match.call(sys.function(caller.frame), call=call)
     .ddg.create.function.nodes(pname, call, full.call, auto.created = TRUE, env = sys.frame(.ddg.get.frame.number(sys.calls()))
     )
+    .ddg.inc (".ddg.func.depth")
   }
-  else {
+  #else {
     #print("ddg.return.value decrementing func.depth")
-    .ddg.dec (".ddg.func.depth")
-  }
+    #.ddg.dec (".ddg.func.depth")
+  #}
 
   if (is.null(cmd.func)) {
     #print("ddg.return.value constructing DDG statement for the return call")
@@ -5219,6 +5244,8 @@ ddg.return.value <- function (expr=NULL, cmd.func=NULL) {
   caller.env = sys.frame(caller.frame)
   
   # Check if there is a return call within this call to ddg.return.
+  # CLEAN UP:  If recursive.call is not needed here, remove the code that sets it.
+  #if (.ddg.has.call.to(parsed.stmt, "return") || recursive.call) {
   if (.ddg.has.call.to(parsed.stmt, "return")) {
     .ddg.proc.node("Operation", return.stmt@abbrev, return.stmt@abbrev, console = TRUE, env=caller.env, cmd=return.stmt)
 
@@ -5253,6 +5280,9 @@ ddg.return.value <- function (expr=NULL, cmd.func=NULL) {
       else ddg.cur.cmd.stack[length(ddg.cur.cmd.stack) - 1][[1]]@pos@startLine
   .ddg.set(".ddg.return.values", ddg.return.values)
   .ddg.set(".ddg.num.returns", ddg.num.returns)
+  #print("ddg.return.value decrementing func.depth")
+  .ddg.dec (".ddg.func.depth")
+  
 
   # If it does not have return, then its parameter was a call to ddg.eval
   # and this stuff has been done already.
@@ -5360,6 +5390,7 @@ ddg.loop.annotate.off <- function() {
 }
 
 ddg.set.inside.loop <- function() {
+  #print(sys.calls())
   if (!.ddg.is.set("ddg.inside.loop")) {
     .ddg.set("ddg.inside.loop", 0)    
   }
